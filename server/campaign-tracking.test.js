@@ -129,6 +129,8 @@ test('falha de envio fica registrada no destinatário da campanha', async () => 
       PORT: String(port),
       DATABASE_PATH: databasePath,
       NODE_ENV: 'test',
+      APP_TIMEZONE: 'UTC',
+      TZ: 'UTC',
       DEMO_MODE: 'false',
       WPP_CONNECT_URL: '',
       WPP_CONNECT_TOKEN: ''
@@ -178,7 +180,11 @@ test('falha de envio fica registrada no destinatário da campanha', async () => 
     const launch = await request(`/api/campaigns/${campaign.id}/launch`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal(launch.status, 200);
 
-    const detail = await (await request(`/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } })).json();
+    let detail = { recipients: [] };
+    for (let attempt = 0; attempt < 20 && detail.recipients.length === 0; attempt += 1) {
+      detail = await (await request(`/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } })).json();
+      if (detail.recipients.length === 0) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     assert.equal(detail.recipients.length, 1);
     assert.equal(detail.recipients[0].status, 'failed');
     assert.match(detail.recipients[0].error, /não está configurado/i);
