@@ -9,6 +9,7 @@ const { createCampaignStore } = require('./storage');
 const { createWppTokenProvider } = require('./wpp-token');
 const { installAuth } = require('./auth');
 const { createTelegramBot } = require('./telegram');
+const { isMissingRecipientError, skipPreviouslyRejectedRecipients } = require('./campaign-errors');
 
 const app = express();
 // Atrás do proxy reverso (Caddy/Nginx) só há um salto até o processo Node, então confiamos
@@ -280,7 +281,9 @@ async function wppRequest(endpoint, body, sessionOverride) {
   });
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`WPPConnect respondeu ${response.status}: ${detail.slice(0, 160)}`);
+    const error = new Error(`WPPConnect respondeu ${response.status}: ${detail.slice(0, 160)}`);
+    error.status = response.status;
+    throw error;
   }
   return response.json().catch(() => ({}));
 }
@@ -406,17 +409,23 @@ async function sendLaneMessage(campaign, lane) {
 }
 
 async function advanceLane(campaign, lane) {
+  let sent = false;
   try {
     await sendLaneMessage(campaign, lane);
     campaign.sent = (campaign.sent || 0) + 1;
+    sent = true;
   } catch (error) {
-    campaign.status = 'error';
-    campaign.statusLabel = 'Falhou';
-    campaign.error = error.message;
-    return;
+    if (!isMissingRecipientError(error)) {
+      campaign.status = 'error';
+      campaign.statusLabel = 'Falhou';
+      campaign.error = error.message;
+      return;
+    }
+    campaign.failed = (campaign.failed || 0) + 1;
+    campaign.lastError = error.message;
   }
   lane.nextIndex += campaign.numberIds.length;
-  lane.sentSinceBreak = (lane.sentSinceBreak || 0) + 1;
+  if (sent) lane.sentSinceBreak = (lane.sentSinceBreak || 0) + 1;
   if (lane.nextIndex >= campaign.recipients.length) {
     lane.done = true;
     return;
@@ -515,7 +524,7 @@ async function tick() {
         try {
           if (campaign.publishedMeta) await publishToMeta(campaign);
           campaign.status = 'completed';
-          campaign.statusLabel = 'Concluída';
+          campaign.statusLabel = campaign.failed ? `Concluída com ${campaign.failed} falha${campaign.failed === 1 ? '' : 's'}` : 'Concluída';
           campaign.completedAt = new Date().toISOString();
         } catch (error) {
           campaign.status = 'error';
@@ -832,7 +841,23 @@ app.post('/api/campaigns/:id/pause', (req, res) => {
 app.post('/api/campaigns/:id/resume', async (req, res) => {
   const campaign = campaigns.find((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
   if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
-  if (campaign.status !== 'paused') return res.status(422).json({ error: 'Esta campanha não está pausada.' });
+  if (!['paused', 'error'].includes(campaign.status)) return res.status(422).json({ error: 'Esta campanha não pode ser retomada.' });
+
+  if (campaign.status === 'error' && campaign.lanes) {
+    const failures = campaignStore.listCampaignRecipients(req.user.id, campaign.id);
+    const skipped = skipPreviouslyRejectedRecipients(campaign, failures);
+    campaign.failed = (campaign.failed || 0) + skipped;
+    campaign.lanes.filter((lane) => !lane.done).forEach((lane) => {
+      lane.nextSendAt = nextWindowMoment(new Date(), campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
+    });
+    campaign.status = 'sending';
+    campaign.statusLabel = 'Enviando';
+    delete campaign.error;
+    campaignStore.save(campaign);
+    await tick();
+    return res.json({ id: campaign.id, status: campaign.status, skipped });
+  }
+
   const resumeTo = campaign.pausedFrom || 'scheduled';
   delete campaign.pausedFrom;
   if (resumeTo === 'sending' && campaign.lanes) {

@@ -311,7 +311,7 @@ function startDashboardPolling() {
 
 function campaignActionButtonsHtml(status) {
   const buttons = [];
-  if (status === 'paused') {
+  if (status === 'paused' || status === 'error') {
     buttons.push('<button class="icon-button" data-action="resume" type="button" aria-label="Retomar campanha" title="Retomar">▶</button>');
   } else if (status === 'scheduled' || status === 'sending') {
     buttons.push('<button class="icon-button" data-action="pause" type="button" aria-label="Pausar campanha" title="Pausar">❚❚</button>');
