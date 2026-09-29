@@ -185,6 +185,7 @@ function normalizeWppContact(contact) {
 }
 
 const MAX_MESSAGE_VARIANTS = 5;
+const MAX_CAMPAIGN_RECIPIENTS = 10000;
 // Anti-ban safety valve: a number that never stops sending looks automated, so every lane
 // takes a longer break after a burst of messages, independent of the daily send window.
 const BURST_LIMIT = 40;
@@ -232,7 +233,7 @@ function validateCampaign(input, ownerId) {
   if (!name) throw new Error('Informe um nome para a campanha.');
   if (!messages.length && !whatsapp.media?.base64) throw new Error('Adicione ao menos uma mensagem ou um arquivo de mídia.');
   if (!recipients.length) throw new Error('Selecione ao menos um contato válido.');
-  if (recipients.length > 500) throw new Error('O limite desta versão é de 500 contatos por campanha.');
+  if (recipients.length > MAX_CAMPAIGN_RECIPIENTS) throw new Error(`O limite é de ${MAX_CAMPAIGN_RECIPIENTS} contatos por campanha.`);
   if (type !== 'text' && !whatsapp.media?.base64) throw new Error('Envie o arquivo da campanha.');
   if (numberIds.length !== requestedNumberIds.length) throw new Error('Um dos números selecionados não pertence ao seu acesso.');
   if (!numberIds.length) throw new Error('Cadastre e selecione ao menos um número para o disparo.');
@@ -736,9 +737,22 @@ app.post('/api/campaigns/test-send', async (req, res) => {
 
 app.post('/api/campaigns', async (req, res) => {
   try {
+    const requestId = String(req.body?.requestId || '').trim();
+    if (requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(422).json({ error: 'Identificador de publicação inválido.' });
+    }
+    if (requestId) {
+      const existing = campaigns.find((item) => item.id === requestId);
+      if (existing && existing.ownerUserId !== req.user.id) {
+        return res.status(409).json({ error: 'Identificador de publicação já utilizado.' });
+      }
+      if (existing) {
+        return res.json({ id: existing.id, status: existing.status, demoMode, replayed: true });
+      }
+    }
     const validated = validateCampaign(req.body, req.user.id);
     const campaign = {
-      id: crypto.randomUUID(),
+      id: requestId || crypto.randomUUID(),
       ownerUserId: req.user.id,
       ...validated,
       media: req.body.media || null,

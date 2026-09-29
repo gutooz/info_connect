@@ -10,7 +10,8 @@ const state = {
   wppNumberStatus: {},
   activeQrNumberId: null,
   qrPendingNumberId: null,
-  editingCampaignId: null
+  editingCampaignId: null,
+  pendingPublishRequestId: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -618,6 +619,37 @@ async function loadData() {
   renderCampaigns();
 }
 
+async function createCampaignWithRetry(payload) {
+  const requestId = state.pendingPublishRequestId || crypto.randomUUID();
+  state.pendingPublishRequestId = requestId;
+  const retryDelays = [0, 1000, 2500];
+
+  for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+    if (retryDelays[attempt]) await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+    let response;
+    try {
+      response = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, requestId })
+      });
+    } catch {
+      if (attempt < retryDelays.length - 1) continue;
+      throw new Error('A internet oscilou durante a publicação. Quando a conexão voltar, clique novamente; a campanha não será duplicada.');
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (response.ok) {
+      state.pendingPublishRequestId = null;
+      return result;
+    }
+    if ([502, 503, 504].includes(response.status) && attempt < retryDelays.length - 1) continue;
+    state.pendingPublishRequestId = null;
+    throw new Error(result.error || 'Não foi possível criar a campanha.');
+  }
+  throw new Error('Não foi possível criar a campanha.');
+}
+
 async function publishCampaign() {
   const name = $('#campaign-name').value.trim();
   const messages = getMessageVariants();
@@ -644,13 +676,19 @@ async function publishCampaign() {
   const editingId = state.editingCampaignId;
   const button = $('#publish-button'); button.disabled = true; button.innerHTML = editingId ? '<span>◌</span> Salvando...' : '<span>◌</span> Publicando...';
   try {
-    const response = await fetch(editingId ? `/api/campaigns/${editingId}` : '/api/campaigns', {
-      method: editingId ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, dailyStartTime, dailyEndTime, numberIds, messageIntervalValue, messageIntervalUnit })
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || (editingId ? 'Não foi possível salvar a campanha.' : 'Não foi possível criar a campanha.'));
+    const payload = { name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, dailyStartTime, dailyEndTime, numberIds, messageIntervalValue, messageIntervalUnit };
+    let result;
+    if (editingId) {
+      const response = await fetch(`/api/campaigns/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Não foi possível salvar a campanha.');
+    } else {
+      result = await createCampaignWithRetry(payload);
+    }
     if (editingId) {
       cancelEditCampaign();
       toast('Campanha atualizada.');

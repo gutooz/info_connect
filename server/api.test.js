@@ -73,6 +73,41 @@ test('cadastro inicial, login e contatos persistidos', async () => {
     const invalidInterval = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Intervalo inválido', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }, { phone: '5511888888888' }], numberIds: [numberId], startAt, dailyStartTime, dailyEndTime, messageIntervalValue: '61', messageIntervalUnit: 'minutes' }) });
     assert.equal(invalidInterval.status, 422);
 
+    const largeAudience = Array.from({ length: 4673 }, (_, index) => ({
+      name: `Contato ${index + 1}`,
+      phone: `5511${String(900000000 + index)}`
+    }));
+    const largeCampaign = await request('/api/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: newCookie },
+      body: JSON.stringify({ name: 'Público completo', type: 'text', messages: ['Mensagem'], recipients: largeAudience, numberIds: [numberId], startAt, dailyStartTime, dailyEndTime, messageIntervalValue: '1', messageIntervalUnit: 'minutes' })
+    });
+    assert.equal(largeCampaign.status, 201);
+    assert.equal((await (await request('/api/campaigns', { headers: { Cookie: newCookie } })).json()).find((item) => item.name === 'Público completo').audience, 4673);
+
+    const publishRequestId = 'b8747e7a-9be0-4ec4-b846-6c95f0a1f001';
+    const publishPayload = {
+      requestId: publishRequestId,
+      name: 'Publicação idempotente',
+      type: 'text',
+      messages: ['Mensagem de teste'],
+      recipients: [{ phone: '5511999999999' }],
+      numberIds: [numberId],
+      startAt,
+      dailyStartTime,
+      dailyEndTime,
+      messageIntervalValue: '1',
+      messageIntervalUnit: 'minutes'
+    };
+    const firstPublish = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify(publishPayload) });
+    assert.equal(firstPublish.status, 201);
+    assert.equal((await firstPublish.json()).id, publishRequestId);
+    const repeatedPublish = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify(publishPayload) });
+    assert.equal(repeatedPublish.status, 200);
+    assert.equal((await repeatedPublish.json()).id, publishRequestId);
+    const campaignsAfterRetry = await (await request('/api/campaigns', { headers: { Cookie: newCookie } })).json();
+    assert.equal(campaignsAfterRetry.filter((item) => item.id === publishRequestId).length, 1);
+
     const secondUser = await request('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Bia', email: 'bia@example.com', password: 'second-password-123' }) });
     assert.equal(secondUser.status, 202);
     assert.equal((await secondUser.json()).pending, true);
