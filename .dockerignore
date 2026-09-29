@@ -1,0 +1,11 @@
+node_modules
+.env
+.git
+data
+log
+tokens
+uploads
+userDataDir
+WhatsAppImages
+major-neto-deploy.tgz
+deploy/runtime

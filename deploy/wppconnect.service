@@ -1,0 +1,30 @@
+[Unit]
+Description=WPPConnect Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=major-neto
+Group=major-neto
+WorkingDirectory=/opt/wppconnect
+EnvironmentFile=/etc/major-neto/wpp.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/wppconnect
+Environment=PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+RuntimeDirectory=wppconnect
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/env wppserver --host 127.0.0.1 --port 21465 --no-startAllSession --log-level info
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/wppconnect
+ReadWritePaths=/run/wppconnect
+MemoryMax=1G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

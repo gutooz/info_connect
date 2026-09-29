@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f9fb" />
+    <title>Info Connect — Central de campanhas</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/overrides.css" />
+  </head>
+  <body>
+    <section class="auth-screen" id="auth-screen">
+      <form class="auth-card" id="auth-form">
+        <div class="auth-brand"><img class="brand-mark" src="/logo.png" alt="" /><span>info connect</span></div>
+        <p class="eyebrow">ACESSO AO SISTEMA</p>
+        <h1 id="auth-title">Entrar</h1>
+        <p id="auth-description">Acesse suas campanhas e contatos.</p>
+        <label class="field-label hidden" id="auth-name-label" for="auth-name">Nome</label>
+        <input class="text-input hidden" id="auth-name" autocomplete="name" placeholder="Seu nome" />
+        <label class="field-label" for="auth-email">E-mail</label>
+        <input class="text-input" id="auth-email" type="email" autocomplete="username" required placeholder="voce@empresa.com" />
+        <label class="field-label" for="auth-password">Senha</label>
+        <input class="text-input" id="auth-password" type="password" autocomplete="current-password" required placeholder="Sua senha" />
+        <p class="auth-error" id="auth-error" role="alert"></p>
+        <button class="button button-primary full-width" id="auth-submit" type="submit">Entrar</button>
+        <button class="text-button hidden" id="auth-cancel" type="button">Voltar</button>
+        <button class="text-button" id="auth-toggle" type="button">Não tem conta? Cadastre-se</button>
+      </form>
+    </section>
+    <div class="app-shell hidden" id="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><img class="brand-mark" src="/logo.png" alt="" /><span>info connect</span></div>
+        <nav class="primary-nav" aria-label="Navegação principal">
+          <p class="nav-label">Workspace</p>
+          <button class="nav-item active" data-view="dashboard"><span class="nav-icon">▦</span> Dashboard <span class="nav-count" id="campaign-count">0</span></button>
+          <button class="nav-item" data-view="campaigns"><span class="nav-icon">✎</span> Campanhas</button>
+          <button class="nav-item" data-view="whatsapp"><span class="nav-icon">◌</span> WhatsApp</button>
+          <button class="nav-item" data-view="contacts"><span class="nav-icon">♧</span> Contatos <span class="nav-count" id="contacts-nav-count">0</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button class="user-menu" id="create-user"><span class="user-avatar">+</span><span><strong id="current-user-name">Usuário</strong><small>Cadastrar usuário</small></span><span class="more">•••</span></button>
+          <button class="text-button" id="logout-button" type="button">Sair</button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><span>/</span><strong id="breadcrumb-current">Dashboard</strong></div>
+          <div class="topbar-actions"><span class="system-status"><i></i><span id="status-text">Tudo operando</span></span><button class="icon-button" aria-label="Notificações">♢<b></b></button><button class="icon-button" aria-label="Ajuda">?</button></div>
+        </header>
+
+        <section class="page-view active" id="dashboard-page">
+        <section class="page-heading">
+          <div><p class="eyebrow">CENTRAL DE COMUNICAÇÃO</p><h1 id="page-title">Dashboard</h1><p id="page-subtitle">Acompanhe as métricas e o histórico dos seus disparos.</p></div>
+          <button class="button button-dark" id="new-campaign-button"><span>＋</span> Nova campanha</button>
+        </section>
+
+        <section class="metrics-grid" aria-label="Resumo das campanhas">
+          <article class="metric-card"><div class="metric-icon teal">↗</div><div><span>Mensagens enviadas</span><strong id="sent-metric">0</strong><small class="neutral" id="sent-metric-caption">Sem dados ainda</small></div><div class="sparkline teal-line">—</div></article>
+          <article class="metric-card"><div class="metric-icon violet">◎</div><div><span>Taxa de entrega</span><strong id="delivery-metric">—</strong><small class="neutral" id="delivery-metric-caption">Sem dados ainda</small></div><div class="sparkline violet-line">—</div></article>
+          <article class="metric-card"><div class="metric-icon amber">◷</div><div><span>Agendamentos ativos</span><strong id="scheduled-metric">0</strong><small class="neutral" id="scheduled-metric-caption">Nenhum agendamento</small></div><div class="sparkline amber-line">—</div></article>
+          <article class="metric-card"><div class="metric-icon coral">♧</div><div><span>Contatos ativos</span><strong id="contacts-metric">0</strong><small class="neutral">Contatos salvos</small></div><div class="sparkline coral-line">—</div></article>
+        </section>
+
+        <section class="recent-section"><div class="section-header-row"><div><h2>Campanhas recentes</h2><p>Veja o que está acontecendo com seus últimos disparos.</p></div><button class="text-button">Ver todas <span>→</span></button></div><div class="table-card"><table><thead><tr><th>Campanha</th><th>Canal</th><th>Público</th><th>Enviadas</th><th>Status</th><th>Quando</th></tr></thead><tbody id="campaign-table-body"></tbody></table></div></section>
+        <footer class="footer"><span>Info Connect · Central de campanhas</span><span>Privacidade · Termos · Status do sistema</span></footer>
+        </section>
+
+        <section class="page-view hidden" id="campaigns-page">
+        <section class="page-heading">
+          <div><p class="eyebrow">DISPAROS</p><h1>Campanhas</h1><p>Monte um disparo com janela de horário, várias mensagens e os números que você escolher.</p></div>
+        </section>
+
+        <section class="workspace-panel" id="campaign-composer">
+          <div class="panel-heading"><div><h2>Nova campanha</h2><p>Configure o disparo e publique quando estiver pronto.</p></div><div class="panel-actions"><span class="draft-pill">Rascunho local</span></div></div>
+          <div class="composer-layout">
+            <div class="composer-form">
+              <div class="form-section"><div class="section-title"><span class="step-number">01</span><div><h3>Escolha o público</h3><p>Selecione quem receberá esta campanha.</p></div></div><div class="audience-box"><div class="audience-top"><div class="avatar-stack" id="audience-list"></div><div><strong id="audience-count">Nenhum contato selecionado</strong><small id="audience-subtitle">Adicione contatos para começar</small></div><button class="text-button" id="edit-audience">Editar</button></div><div class="audience-progress"><span id="audience-progress-bar"></span></div><div class="audience-foot"><span id="audience-footnote">Nenhum contato cadastrado</span><button class="add-contact-button" id="open-contacts">＋ Adicionar contatos</button></div></div></div>
+
+              <div class="form-section"><div class="section-title"><span class="step-number">02</span><div><h3>Nome e mensagens</h3><p>Até 5 variações são alternadas a cada envio.</p></div></div><label class="field-label" for="campaign-name">Nome da campanha</label><input class="text-input" id="campaign-name" placeholder="Ex.: campanha de setembro" maxlength="120" /><div class="content-tabs" role="tablist"><button class="content-tab active" data-type="text" role="tab">☷ <span>Texto</span></button><button class="content-tab" data-type="image" role="tab">▧ <span>Imagem</span></button><button class="content-tab" data-type="video" role="tab">▶ <span>Vídeo</span></button></div><div class="upload-area hidden" id="upload-area"><input type="file" id="media-file" accept="image/*,video/*" hidden /><button class="upload-trigger" id="upload-trigger"><span class="upload-icon">↥</span><strong>Arraste ou clique para enviar</strong><small>PNG, JPG ou MP4 até 15 MB</small></button><div class="file-preview hidden" id="file-preview"><span class="file-type">IMG</span><span id="file-name">arquivo selecionado</span><button id="remove-file" aria-label="Remover arquivo">×</button></div></div><div class="message-variant-list" id="message-variant-list"><div class="message-variant" data-index="0"><label class="field-label variant-label">Mensagem principal</label><div class="message-editor"><textarea id="message" class="variant-textarea" maxlength="4096" placeholder="Escreva sua mensagem..."></textarea><div class="editor-footer"><span id="char-count" class="variant-char-count">0 / 4096</span><div><button class="editor-action" aria-label="Emoji">☺</button><button class="editor-action" aria-label="Inserir variável">{ }</button></div></div></div></div></div><button class="text-button" id="add-message-variant" type="button">＋ Adicionar variação (até 5)</button></div>
+
+              <div class="form-section"><div class="section-title"><span class="step-number">03</span><div><h3>Janela de envio</h3><p>Defina quando a campanha come&#231;a e termina.</p></div></div><div class="datetime-row"><div><label class="field-label" for="campaign-start">Início</label><input class="text-input" id="campaign-start" type="datetime-local" /></div><div><label class="field-label" for="campaign-end">Término</label><input class="text-input" id="campaign-end" type="datetime-local" /></div></div><div class="interval-row"><div><label class="field-label" for="message-interval">Intervalo entre mensagens</label><input class="text-input" id="message-interval" type="number" min="1" step="1" placeholder="Ex.: 30" /></div><div><label class="field-label" for="message-interval-unit">Unidade</label><select class="text-input" id="message-interval-unit"><option value="seconds">Segundos</option><option value="minutes">Minutos</option></select></div></div><p class="helper-text">Deixe em branco para distribuir os envios automaticamente na janela escolhida.</p></div>
+
+              <div class="form-section"><div class="section-title"><span class="step-number">04</span><div><h3>Números para o disparo</h3><p>Selecione quais números vão enviar esta campanha.</p></div></div><div class="number-checklist" id="campaign-number-checklist"></div></div>
+            </div>
+
+            <aside class="preview-column"><button class="button button-primary full-width" id="publish-button"><span>↗</span> Publicar campanha</button><p class="safe-note">⌁ Nenhum dado será enviado antes da configuração das integrações.</p></aside>
+          </div>
+        </section>
+        </section>
+
+        <section class="page-view hidden" id="whatsapp-page">
+          <section class="page-heading"><div><p class="eyebrow">CONEXÃO E PÚBLICO</p><h1>WhatsApp</h1><p>Conecte sua sessão e importe os contatos que receberão suas campanhas.</p></div><span class="integration-badge pending"><i></i> Não conectado</span></section>
+          <article class="connection-card"><div class="connection-card-head"><div class="service-logo whatsapp-logo">◌</div><div><h2>Números do WhatsApp</h2><p>Cadastre um ou mais números. Os contatos importados são divididos automaticamente entre eles.</p></div></div><button class="button button-primary full-width wpp-qr-create" id="generate-wpp-qr" type="button">&#9638; Gerar QR Code para novo n&#250;mero</button><div class="wpp-number-list" id="wpp-number-list"></div><div class="wpp-number-form"><label class="field-label" for="wpp-number-label">Nome do número</label><input class="text-input" id="wpp-number-label" placeholder="Ex.: Vendas 1" /><label class="field-label" for="wpp-number-session">Sessão (sem espaços)</label><input class="text-input" id="wpp-number-session" placeholder="Ex.: vendas-1" /><button class="button button-dark full-width" id="add-wpp-number" type="button">＋ Adicionar número</button></div><div class="qr-placeholder" id="qr-placeholder"><span>▦</span><strong>O QR Code aparecerá aqui</strong><small>Clique em "Gerar QR Code" para conectar um n&#250;mero</small></div></article>
+        </section>
+
+        <section class="page-view hidden" id="contacts-page">
+          <section class="page-heading"><div><p class="eyebrow">PÚBLICO CADASTRADO</p><h1>Contatos</h1><p>Todos os contatos importados por planilha ou adicionados manualmente.</p></div></section>
+          <article class="connection-card"><div class="connection-card-head"><div class="service-logo contacts-logo">♧</div><div><h2>Importar contatos</h2><p>Suba uma planilha Excel ou CSV com nome e número do WhatsApp.</p></div></div><input type="file" id="contacts-file" accept=".xlsx,.xls,.csv" hidden /><button class="upload-large" id="contacts-upload"><span>↥</span><strong>Selecionar planilha</strong><small>XLSX, XLS ou CSV · até 10 MB</small></button><div class="imported-file hidden" id="imported-file"><span class="file-type">XLS</span><span id="contacts-file-name"></span><button id="remove-contacts-file" aria-label="Remover planilha">×</button></div><p class="helper-text">Colunas aceitas: <code>nome</code>, <code>telefone</code> (com DDI) e <code>regiao</code>/<code>cidade</code> (opcional). Sem nome vira "Delivery"; sem região vira "Brasil".</p><button class="button button-dark full-width" id="import-contacts" disabled>Importar contatos</button></article>
+          <section class="info-banner"><span>i</span><div><strong>Como funciona a divisão</strong><p>Cada número cadastrado recebe uma fatia igual dos contatos importados, na ordem em que os números foram adicionados. Um contato adicionado manualmente vai para o número com menos contatos no momento.</p></div></section>
+          <div class="table-card"><table><thead><tr><th>Nome</th><th>Telefone</th><th>Região</th></tr></thead><tbody id="contacts-table-body"></tbody></table></div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <div class="modal-backdrop hidden" id="contacts-modal"><div class="contacts-modal"><div class="modal-heading"><div><p class="eyebrow">PÚBLICO DA CAMPANHA</p><h2>Adicionar contatos</h2></div><button class="icon-button" id="close-contacts">×</button></div><p class="modal-copy">Cadastre um contato individual para receber esta campanha.</p><label class="field-label" for="contact-name">Nome</label><input class="text-input" id="contact-name" placeholder="Nome do contato" /><label class="field-label" for="contact-phone">WhatsApp com DDI</label><input class="text-input" id="contact-phone" inputmode="numeric" placeholder="55 + DDD + número" /><button class="button button-dark full-width" id="add-contact">＋ Adicionar contato</button><div class="contact-list" id="contact-list"></div><button class="button button-primary full-width" id="save-contacts">Salvar público</button></div></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

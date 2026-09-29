@@ -1,0 +1,25 @@
+[Unit]
+Description=Major Neto campaign panel
+After=network-online.target wppconnect.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=major-neto
+Group=major-neto
+WorkingDirectory=/opt/major-neto
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/major-neto/app.env
+ExecStart=/usr/bin/node /opt/major-neto/server/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/major-neto/data /opt/major-neto/uploads /opt/major-neto/log
+MemoryMax=512M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

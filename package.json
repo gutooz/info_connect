@@ -1,0 +1,22 @@
+{
+  "name": "major-neto-campaigns",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Painel de campanhas para WhatsApp via WPPConnect e publicacao automatica no Meta.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test server/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "multer": "^2.4.0"
+  }
+}

@@ -1,0 +1,10 @@
+.env
+node_modules/
+log/
+tokens/
+uploads/
+data/
+userDataDir/
+WhatsAppImages/
+*.log
+deploy/runtime/

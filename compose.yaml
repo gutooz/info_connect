@@ -1,0 +1,61 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: ./deploy/runtime/app.env
+        format: raw
+      - path: ./deploy/runtime/wpp.env
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      DATABASE_PATH: /data/major-neto.sqlite
+      WPP_CONNECT_URL: http://wppconnect:21465
+    volumes:
+      - app_data:/data
+    depends_on:
+      - wppconnect
+    networks:
+      - internal
+
+  wppconnect:
+    build:
+      context: .
+      dockerfile: Dockerfile.wppconnect
+    image: major-neto-wppconnect:2.10.18
+    restart: unless-stopped
+    env_file:
+      - path: ./deploy/runtime/wpp.env
+        format: raw
+    volumes:
+      - wpp_tokens:/usr/src/wpp-server/tokens
+      - wpp_user_data:/usr/src/wpp-server/userDataDir
+    networks:
+      - internal
+
+  web:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: ./deploy/runtime/web.env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  app_data:
+  wpp_tokens:
+  wpp_user_data:
+  caddy_data:
+  caddy_config:

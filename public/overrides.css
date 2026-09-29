@@ -1,0 +1,110 @@
+.empty-state{padding:28px 12px;text-align:center;color:#7f8d93}.empty-state strong,.empty-state span{display:block}.empty-state strong{font-size:12px;color:#52636a;margin-bottom:5px}.empty-state span{font-size:11px}.contact-list{margin-top:14px}.contact-row{display:flex;align-items:center;gap:10px;border-top:1px solid #edf0f1;padding:10px 0}.contact-row strong,.contact-row small{display:block}.contact-row strong{font-size:11px}.contact-row small{font-size:10px;color:#9aa5aa;margin-top:2px}.contacts-modal .text-input{margin-bottom:8px}.contact-divider{display:flex;align-items:center;gap:8px;color:#a0abad;font-size:10px;margin:14px 0}.contact-divider::before,.contact-divider::after{content:'';height:1px;background:#e6eeee;flex:1}.qr-image{width:180px;height:180px;object-fit:contain;background:#fff;padding:8px;border-radius:8px}
+.page-view.hidden{display:none}.panel-actions{display:flex;align-items:center;gap:10px}.channel-switcher{display:flex;gap:3px;background:#f1f5f5;border-radius:8px;padding:3px}.channel-tab{background:transparent;color:#87979a;border-radius:6px;padding:6px 9px;font-size:10px;font-weight:700}.channel-tab.active{background:#fff;color:#218b7c;box-shadow:0 1px 4px rgba(28,58,66,.08)}.connection-grid,.instagram-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px}.connection-card,.instagram-preview-card{background:#fff;border:1px solid #e6ebef;border-radius:14px;padding:24px}.connection-card-head,.preview-mini-header,.oauth-note{display:flex;align-items:center;gap:12px}.connection-card-head{margin-bottom:23px}.connection-card h2{font:600 17px 'Space Grotesk',sans-serif;margin:0 0 5px}.connection-card p{font-size:12px;color:#94a0a5;line-height:1.5;margin:0}.service-logo{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;font-size:23px}.whatsapp-logo{background:#d9f3ed;color:#1d917e}.contacts-logo{background:#fff0d4;color:#d09425}.instagram-logo{background:#efe7ff;color:#805fc4}.instagram-logo.mini{width:30px;height:30px;font-size:18px}.connection-card .button{margin-top:4px}.qr-placeholder{display:grid;place-items:center;min-height:150px;border:1px dashed #c7ded9;border-radius:11px;background:#f8fcfb;color:#5f9e94;margin-top:18px;text-align:center}.qr-placeholder span{font-size:29px}.qr-placeholder strong,.qr-placeholder small{display:block}.qr-placeholder strong{font-size:12px;color:#3c6863;margin-top:7px}.qr-placeholder small{font-size:10px;color:#9caaa9;margin-top:4px}.upload-large{width:100%;min-height:151px;border:1px dashed #c7ded9;border-radius:11px;background:#f8fcfb;color:#368d80;display:flex;align-items:center;justify-content:center;flex-direction:column}.upload-large:hover{border-color:#65bbaa;background:#f0faf7}.upload-large span{font-size:26px}.upload-large strong{font-size:12px;margin:5px 0}.upload-large small{font-size:10px;color:#9caaa9}.imported-file{display:flex;align-items:center;gap:8px;border:1px solid #d9eae6;background:#f6fbfa;border-radius:8px;padding:10px;font-size:11px}.imported-file button{margin-left:auto;background:transparent;color:#9aaaa9;font-size:17px}.helper-text{font-size:10px!important;color:#9aa5aa!important;margin:12px 0!important}.helper-text code{color:#4e817a}.info-banner{display:flex;align-items:flex-start;gap:10px;background:#edf8f5;border:1px solid #d8eee9;border-radius:11px;padding:15px;margin-top:16px}.info-banner>span{display:grid;place-items:center;border:1px solid #7bc4b6;width:18px;height:18px;border-radius:50%;color:#278c7d;font-weight:700;font-size:11px}.info-banner strong{font-size:11px}.info-banner p{margin:4px 0 0;color:#75938f;font-size:10px}.oauth-note{background:#f7f5fc;border:1px solid #ece7fa;border-radius:10px;padding:12px;margin-bottom:18px}.oauth-note>span{font-size:21px;color:#8063c8}.oauth-note strong,.oauth-note small{display:block}.oauth-note strong{font-size:11px}.oauth-note small{color:#9a96a7;font-size:10px;margin-top:3px}.instagram-preview-card{min-height:370px;background:linear-gradient(180deg,#fff 0%,#fbf9ff 100%)}.preview-mini-header{padding-bottom:16px;border-bottom:1px solid #eeeaf5}.preview-mini-header strong,.preview-mini-header small{display:block}.preview-mini-header strong{font-size:12px}.preview-mini-header small{font-size:10px;color:#a19baa;margin-top:3px}.instagram-empty{height:270px;display:grid;place-items:center;align-content:center;text-align:center;color:#a69eb5}.instagram-empty span{font-size:42px;color:#c9b9eb}.instagram-empty strong{font-size:13px;color:#655a75;margin:8px 0 4px}.instagram-empty small{font-size:10px;max-width:180px;line-height:1.4}@media(max-width:900px){.connection-grid,.instagram-layout{grid-template-columns:1fr}.panel-actions{align-items:flex-end;flex-direction:column}.channel-tab{padding:5px 7px}}
+.campaign-controls{background:#f8fbfb;border:1px solid #e4eeee;border-radius:10px;padding:12px;margin-bottom:12px}.campaign-controls .field-label{margin-bottom:6px}.campaign-controls .text-input{margin-bottom:10px}.ai-option{display:flex;align-items:center;gap:7px;font-size:11px;color:#53666a;font-weight:600}.ai-option input{accent-color:#1d917e}.campaign-controls input:disabled{cursor:not-allowed}.campaign-controls small{display:block;color:#99a7a8;font-size:10px;margin-top:5px}
+.qr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}.qr-actions .button{margin-top:0}.button-secondary{background:#edf7f5;color:#267f73;border:1px solid #cce5df}.button-secondary:hover{background:#e1f2ee}
+.integration-badge{display:inline-flex;align-items:center;gap:7px;border-radius:99px;padding:7px 10px;font-size:10px;font-weight:700;white-space:nowrap}.integration-badge i{width:6px;height:6px;border-radius:50%;display:inline-block}.integration-badge.pending{background:#fff3dc;color:#b77b20}.integration-badge.pending i{background:#e6a235}.integration-badge.connected{background:#e5f6f0;color:#279b81}.integration-badge.connected i{background:#279b81}.qr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}.qr-actions .button{margin-top:0}.button-secondary{background:#edf7f5;color:#267f73;border:1px solid #cce5df}.button-secondary:hover{background:#e1f2ee}
+
+/* Compact layout: fit the Campanhas page in one viewport, no page scroll */
+.main-content{max-height:100vh;overflow-y:auto}
+.topbar{height:32px}
+.page-heading{padding:4px 0 5px;align-items:center}
+.eyebrow{margin:0 0 1px}
+.page-heading h1{font-size:18px;margin:0 0 1px}
+.page-heading p:not(.eyebrow){font-size:10px}
+.metrics-grid{gap:8px;margin-bottom:6px}
+.metric-card{min-height:40px;padding:5px 10px;gap:7px}
+.metric-icon{width:20px;height:20px;font-size:12px;border-radius:6px}
+.metric-card span{font-size:9px;margin:0 0 1px}
+.metric-card strong{font-size:14px}
+.metric-card small,.sparkline{display:none}
+.workspace-panel{padding:7px 16px 9px}
+.panel-heading h2{font-size:13px;margin:0 0 1px}
+.panel-heading p{font-size:10px}
+.draft-pill{padding:3px 8px}
+.composer-layout{gap:22px;margin-top:6px}
+.form-section{padding:0 0 5px;margin-bottom:5px}
+.section-title{margin-bottom:5px;gap:8px}
+.step-number{width:18px;height:18px;font-size:9px}
+.section-title h3{font-size:11px;margin:0 0 1px}
+.section-title p{display:none}
+.audience-box{padding:6px 9px}
+.audience-progress{margin:5px 0 4px}
+.field-label{margin:0 0 3px}
+.text-input{height:27px;margin-bottom:5px}
+.content-tabs{margin-bottom:5px;padding:2px}
+.content-tab{height:22px}
+.message-editor textarea{min-height:32px;padding:6px}
+.editor-footer{height:22px}
+.upload-area{margin-top:5px}
+.upload-trigger{min-height:40px}
+.upload-icon{font-size:14px}
+.schedule-options{gap:6px}
+.schedule-option{padding:6px}
+.schedule-option small{margin-top:2px}
+.datetime-row{margin-top:5px}
+.preview-column{padding-left:20px}
+.preview-heading{margin-bottom:5px}
+.phone-preview{max-width:150px}
+.phone-notch{height:3px;width:40px}
+.chat-header{height:26px;gap:5px}
+.mini-avatar{width:20px;height:20px}
+.chat-header strong,.chat-header small{white-space:nowrap}
+.chat-body{padding:6px 5px 8px;min-height:64px}
+.date-chip{margin:0 auto 6px}
+.bubble{padding:4px 5px 8px;font-size:8px}
+.chat-input{height:20px}
+.meta-card{padding:6px;margin-top:6px}
+.meta-logo{width:18px;height:18px;font-size:12px;border-radius:5px}
+.meta-divider{margin:5px 0}
+.preview-column .button-primary{margin-top:6px;height:27px}
+.safe-note{margin:4px 0 0;font-size:8px}
+.recent-section{margin-top:6px}
+.section-header-row{margin-bottom:4px}
+.section-header-row h2{font-size:12px}
+.table-card{max-height:420px;overflow-y:auto}
+th{padding:4px 12px;font-size:9px}
+td{padding:5px 12px}
+.empty-state{padding:6px 12px}
+.empty-state strong{font-size:10px;margin-bottom:1px}
+.empty-state span{font-size:9px}
+.footer{margin:4px 2px 0}
+/* Acesso */
+.auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f3f7f6; }
+.auth-screen.hidden, .app-shell.hidden, .auth-card .hidden { display: none !important; }
+.auth-card { width: min(100%, 420px); padding: 36px; border-radius: 20px; background: #fff; box-shadow: 0 18px 60px rgba(15, 50, 47, .12); }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; font-weight: 700; font-size: 20px; }
+.auth-brand .brand-mark { width: 40px; height: 40px; }
+.auth-card h1 { margin: 4px 0 8px; }
+.auth-card p { color: #667673; }
+.auth-card .field-label { display: block; margin: 18px 0 7px; }
+.auth-card .text-input { width: 100%; }
+.auth-card .button { margin-top: 20px; }
+.auth-error { min-height: 20px; color: #b32632 !important; font-size: 13px; }
+#logout-button { margin: 12px 20px; }
+/* Múltiplos números do WhatsApp */
+.wpp-number-list{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.wpp-qr-create{margin:14px 0}
+.interval-row{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:8px;margin-top:12px}
+.interval-row .text-input{margin-bottom:0}
+@media(max-width:480px){.interval-row{grid-template-columns:minmax(0,1fr) 115px}}
+.wpp-number-row{display:flex;align-items:center;gap:10px;border:1px solid #e6ebef;border-radius:10px;padding:9px 10px}
+.wpp-number-row .service-logo.mini{width:30px;height:30px;font-size:16px;flex-shrink:0}
+.wpp-number-row strong{display:block;font-size:12px}
+.wpp-number-row small{display:block;font-size:10px;color:#9aa5aa;margin-top:2px}
+.wpp-number-row .integration-badge{margin-left:auto}
+.wpp-number-row .button-secondary{padding:6px 10px;font-size:10px}
+.wpp-number-row .icon-button{width:24px;height:24px;font-size:15px;color:#b7838a}
+.wpp-number-row .icon-button:hover{background:#fbeceb;color:#a2454f}
+.wpp-number-form{border-top:1px solid #edf0f1;padding-top:14px}
+.wpp-number-form .text-input{margin-bottom:10px}
+/* Construtor de campanhas: variações de mensagem e escolha de números */
+.message-variant-list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.message-variant .variant-label{margin:0 0 4px}
+#add-message-variant{margin-top:8px}
+#add-message-variant:disabled{color:#b7c0c3;cursor:not-allowed}
+.remove-variant{margin-left:auto}
+.number-checklist{display:flex;flex-direction:column;gap:6px}
+.number-check-row{display:flex;align-items:center;gap:9px;border:1px solid #e4eaec;border-radius:9px;padding:8px 10px;cursor:pointer}
+.number-check-row input{accent-color:#1d917e}
+.number-check-row strong{display:block;font-size:11px}
+.number-check-row small{display:block;font-size:10px;color:#9aa5aa;margin-top:1px}

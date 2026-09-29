@@ -1,0 +1,11 @@
+{$PANEL_DOMAIN}, 177.7.60.78.sslip.io {
+  encode gzip
+  request_body {
+    max_size 25MB
+  }
+  reverse_proxy app:3000
+}
+
+www.{$PANEL_DOMAIN} {
+  redir https://{$PANEL_DOMAIN}{uri} permanent
+}
