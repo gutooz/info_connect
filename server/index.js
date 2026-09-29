@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 require('dotenv').config();
+process.env.TZ = String(process.env.APP_TIMEZONE || 'America/Sao_Paulo');
 const { createCampaignStore } = require('./storage');
 const { createWppTokenProvider } = require('./wpp-token');
 const { installAuth } = require('./auth');

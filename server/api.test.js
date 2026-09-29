@@ -23,7 +23,7 @@ test('cadastro inicial, login e contatos persistidos', async () => {
   await new Promise((resolve) => server.close(resolve));
   const databasePath = path.join(directory, 'test.sqlite');
   const child = spawn(process.execPath, [path.join(__dirname, 'index.js')], {
-    env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), DATABASE_PATH: databasePath, NODE_ENV: 'test', DEMO_MODE: 'true' },
+    env: { ...process.env, TZ: 'UTC', APP_TIMEZONE: 'America/Sao_Paulo', HOST: '127.0.0.1', PORT: String(port), DATABASE_PATH: databasePath, NODE_ENV: 'test', DEMO_MODE: 'true' },
     stdio: 'ignore'
   });
   const base = `http://127.0.0.1:${port}`;
@@ -72,6 +72,11 @@ test('cadastro inicial, login e contatos persistidos', async () => {
     assert.equal((await saved.json())[0].delayMs, 120000);
     const invalidInterval = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Intervalo inválido', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }, { phone: '5511888888888' }], numberIds: [numberId], startAt, dailyStartTime, dailyEndTime, messageIntervalValue: '61', messageIntervalUnit: 'minutes' }) });
     assert.equal(invalidInterval.status, 422);
+
+    const localTimeCampaign = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Horário local', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }], numberIds: [numberId], startAt: '2030-09-29T08:00', dailyStartTime, dailyEndTime, messageIntervalValue: '1', messageIntervalUnit: 'minutes' }) });
+    assert.equal(localTimeCampaign.status, 201);
+    const localTimeSaved = await (await request('/api/campaigns', { headers: { Cookie: newCookie } })).json();
+    assert.equal(localTimeSaved.find((item) => item.name === 'Horário local').scheduledAt, '2030-09-29T11:00:00.000Z');
 
     const largeAudience = Array.from({ length: 4673 }, (_, index) => ({
       name: `Contato ${index + 1}`,

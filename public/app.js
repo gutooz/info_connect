@@ -655,7 +655,7 @@ async function publishCampaign() {
   const messages = getMessageVariants();
   const publicUrlInput = $('#public-url');
   if (publicUrlInput && state.media) state.media.publicUrl = publicUrlInput.value.trim();
-  const startAt = $('#campaign-start').value;
+  const startAtInput = $('#campaign-start').value;
   const dailyStartTime = $('#daily-start').value;
   const dailyEndTime = $('#daily-end').value;
   const messageIntervalValue = $('#message-interval').value.trim();
@@ -663,7 +663,7 @@ async function publishCampaign() {
   const numberIds = $$('#campaign-number-checklist input:checked').map((input) => input.value);
   if (!state.recipients.length) return toast('Adicione ao menos um contato ao público.');
   if (!name || (!messages.length && !state.media)) return toast('Preencha o nome e ao menos uma mensagem (ou mídia).');
-  if (!startAt) return toast('Informe a data e hora de início da campanha.');
+  if (!startAtInput) return toast('Informe a data e hora de início da campanha.');
   if (!dailyStartTime || !dailyEndTime) return toast('Informe o horário diário de início e término dos disparos.');
   if (dailyEndTime <= dailyStartTime) return toast('O horário diário de término precisa ser depois do início.');
   if (!messageIntervalValue) return toast('Informe o intervalo entre mensagens.');
@@ -672,6 +672,9 @@ async function publishCampaign() {
     return toast('Escolha de 1 a 3600 segundos ou de 1 a 60 minutos.');
   }
   if (state.wppNumbers.length && !numberIds.length) return toast('Selecione ao menos um número para o disparo.');
+  const startDate = new Date(startAtInput);
+  if (Number.isNaN(startDate.getTime())) return toast('Informe uma data e hora de início válida.');
+  const startAt = startDate.toISOString();
   const estimate = computeSendEstimate();
   const editingId = state.editingCampaignId;
   const button = $('#publish-button'); button.disabled = true; button.innerHTML = editingId ? '<span>◌</span> Salvando...' : '<span>◌</span> Publicando...';
