@@ -35,6 +35,9 @@ test('webhook do WPPConnect atualiza entrega e resposta, refletidas no dashboard
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.equal(ready, true);
+    const health = await request('/api/health');
+    assert.equal(health.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    assert.equal(health.headers.get('x-xss-protection'), '0');
 
     await request('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Ana', email: 'ana@example.com', password: 'correct-password' }) });
     approvePendingByEmail(databasePath, 'ana@example.com');
