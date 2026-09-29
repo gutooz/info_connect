@@ -14,7 +14,7 @@ docker compose up -d wppconnect
 docker compose exec -T wppconnect node -e 'fetch("http://127.0.0.1:21465/api/major/CHAVE_SECRETA/generate-token", {method:"POST"}).then(r=>r.json()).then(console.log)'
 ```
 
-O script `deploy/bootstrap-docker.sh` grava os segredos da integração em `deploy/runtime` e inicia os serviços. Execute `bash deploy/bootstrap-docker.sh` na VPS. Não coloque chaves ou tokens em Git, chat ou logs. Depois:
+O script `deploy/bootstrap-docker.sh` grava os segredos da integração em `deploy/runtime` e inicia os serviços. Em toda execução ele sincroniza `PUBLIC_BASE_URL` com o `PANEL_DOMAIN` de `web.env`, adiciona as chaves novas que faltarem e preserva o `WPP_WEBHOOK_SECRET` já criado (ou gera um na primeira execução). Sem essas duas variáveis, o dashboard não recebe status de entregue/lido/respondido e o endpoint de webhook fica aberto sem autenticação. Execute `bash deploy/bootstrap-docker.sh` na VPS. Não coloque chaves ou tokens em Git, chat ou logs. Depois:
 
 ```sh
 docker compose up -d
@@ -26,7 +26,7 @@ Abra o endereço HTTPS, cadastre o primeiro usuário e leia o QR Code no painel.
 
 ## Troca de domínio
 
-Quando o registro A de `sinaipro.com.br` apontar para `177.7.60.78`, altere `PANEL_DOMAIN` em `deploy/runtime/web.env` e execute `docker compose up -d --force-recreate web`. Caddy obtém o certificado automaticamente.
+Quando trocar o domínio, altere `PANEL_DOMAIN` em `deploy/runtime/web.env` e execute `bash deploy/bootstrap-docker.sh`. O script sincroniza `PUBLIC_BASE_URL`, recria os serviços e o Caddy obtém o certificado automaticamente.
 
 ## Backup
 

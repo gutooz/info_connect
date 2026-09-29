@@ -10,6 +10,10 @@ const { installAuth } = require('./auth');
 const { createTelegramBot } = require('./telegram');
 
 const app = express();
+// Atrás do proxy reverso (Caddy/Nginx) só há um salto até o processo Node, então confiamos
+// em X-Forwarded-For apenas desse salto: sem isso req.ip fica sempre igual ao IP do proxy,
+// o que faria o rate limit de login (server/auth.js) valer para todo mundo de uma vez só.
+app.set('trust proxy', 1);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
 const demoMode = process.env.DEMO_MODE !== 'false';
@@ -97,10 +101,6 @@ function onlyDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 function normalizeRecipients(recipients) {
   if (!Array.isArray(recipients)) return [];
   return recipients
@@ -183,6 +183,10 @@ function normalizeWppContact(contact) {
 }
 
 const MAX_MESSAGE_VARIANTS = 5;
+// Anti-ban safety valve: a number that never stops sending looks automated, so every lane
+// takes a longer break after a burst of messages, independent of the daily send window.
+const BURST_LIMIT = 40;
+const BURST_PAUSE_MS = 15 * 60 * 1000;
 
 function parseTimeOfDay(value) {
   const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
@@ -354,28 +358,25 @@ function simulateDemoDeliveryAndReply({ messageId, ownerId, wppNumberId, phone }
   }, 1500 + Math.random() * 2500);
 }
 
-async function sendToWhatsApp(campaign) {
+// Each number in numberIds runs its own lane: lane L owns recipients at indexes L, L+laneCount, L+2*laneCount, ...
+// so lanes send in parallel and each one pauses/resumes with the campaign's daily window independently.
+async function sendLaneMessage(campaign, lane) {
   const content = campaign.channels?.whatsapp || campaign;
   const messages = content.messages && content.messages.length ? content.messages : [content.message || ''];
   const numbersById = new Map(campaignStore.listWppNumbers(campaign.ownerUserId).map((number) => [number.id, number.session]));
-  const chosenNumberIds = campaign.numberIds || [];
-  const chosenSessions = chosenNumberIds.map((id) => numbersById.get(id)).filter(Boolean);
-  if (chosenSessions.length !== chosenNumberIds.length || !chosenSessions.length) throw new Error('Número da campanha removido ou indisponível.');
-  let sent = 0;
-  for (const [index, recipient] of campaign.recipients.entries()) {
-    if (index > 0) await wait(campaign.delayMs || 3000);
-    const numberIndex = index % chosenSessions.length;
-    const session = chosenSessions[numberIndex];
-    const wppNumberId = chosenNumberIds[numberIndex];
-    const baseMessage = messages[index % messages.length] || '';
-    let message = baseMessage;
-    if (campaign.aiPersonalization && baseMessage) {
-      try { message = await personalizeMessage(baseMessage, recipient); } catch (_error) { campaign.aiFallbacks = (campaign.aiFallbacks || 0) + 1; message = applyTemplate(baseMessage, recipient); }
-    } else {
-      message = applyTemplate(baseMessage, recipient);
-    }
-    const recipientRowId = crypto.randomUUID();
-    campaignStore.createRecipient({ id: recipientRowId, campaignId: campaign.id, ownerId: campaign.ownerUserId, wppNumberId, phone: recipient.phone, name: recipient.name });
+  const session = numbersById.get(lane.numberId);
+  if (!session) throw new Error('Número da campanha removido ou indisponível.');
+  const recipient = campaign.recipients[lane.nextIndex];
+  const baseMessage = messages[lane.nextIndex % messages.length] || '';
+  let message = baseMessage;
+  if (campaign.aiPersonalization && baseMessage) {
+    try { message = await personalizeMessage(baseMessage, recipient); } catch (_error) { campaign.aiFallbacks = (campaign.aiFallbacks || 0) + 1; message = applyTemplate(baseMessage, recipient); }
+  } else {
+    message = applyTemplate(baseMessage, recipient);
+  }
+  const recipientRowId = crypto.randomUUID();
+  campaignStore.createRecipient({ id: recipientRowId, campaignId: campaign.id, ownerId: campaign.ownerUserId, wppNumberId: lane.numberId, phone: recipient.phone, name: recipient.name });
+  try {
     let messageId = null;
     if (demoMode) {
       await new Promise((resolve) => setTimeout(resolve, 40));
@@ -393,10 +394,34 @@ async function sendToWhatsApp(campaign) {
       messageId = extractWppMessageId(result);
     }
     campaignStore.markRecipientSent(recipientRowId, { messageId, sentAt: new Date().toISOString() });
-    if (demoMode) simulateDemoDeliveryAndReply({ messageId, ownerId: campaign.ownerUserId, wppNumberId, phone: recipient.phone });
-    sent += 1;
+    if (demoMode) simulateDemoDeliveryAndReply({ messageId, ownerId: campaign.ownerUserId, wppNumberId: lane.numberId, phone: recipient.phone });
+  } catch (error) {
+    campaignStore.markRecipientFailed(recipientRowId, error.message);
+    throw error;
   }
-  return sent;
+}
+
+async function advanceLane(campaign, lane) {
+  try {
+    await sendLaneMessage(campaign, lane);
+    campaign.sent = (campaign.sent || 0) + 1;
+  } catch (error) {
+    campaign.status = 'error';
+    campaign.statusLabel = 'Falhou';
+    campaign.error = error.message;
+    return;
+  }
+  lane.nextIndex += campaign.numberIds.length;
+  lane.sentSinceBreak = (lane.sentSinceBreak || 0) + 1;
+  if (lane.nextIndex >= campaign.recipients.length) {
+    lane.done = true;
+    return;
+  }
+  const takeBreak = lane.sentSinceBreak >= BURST_LIMIT;
+  if (takeBreak) lane.sentSinceBreak = 0;
+  const gapMs = takeBreak ? BURST_PAUSE_MS : (campaign.delayMs || 3000);
+  const proposed = new Date(Date.now() + gapMs);
+  lane.nextSendAt = nextWindowMoment(proposed, campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
 }
 
 async function publishToMeta(campaign) {
@@ -437,26 +462,68 @@ async function publishToMeta(campaign) {
   return published;
 }
 
-async function runCampaign(campaign) {
+function startCampaign(campaign) {
   campaign.status = 'sending';
   campaign.statusLabel = 'Enviando';
-  campaign.sent = 0;
+  campaign.sent = campaign.sent || 0;
+  const scheduledAt = Date.parse(campaign.scheduledAt);
+  const initialReference = new Date(Math.max(Number.isFinite(scheduledAt) ? scheduledAt : 0, Date.now()));
+  const initial = nextWindowMoment(initialReference, campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
+  campaign.lanes = campaign.numberIds.map((numberId, laneIndex) => ({
+    numberId, nextIndex: laneIndex, nextSendAt: initial, done: laneIndex >= campaign.recipients.length, sentSinceBreak: 0
+  }));
   campaignStore.save(campaign);
+}
+
+let tickRunning = false;
+
+// Ticks every campaign that's due: starts scheduled ones whose start time has passed, then lets
+// each lane of every 'sending' campaign send its next message once its nextSendAt has arrived.
+// Progress lives in campaign.lanes, persisted on every save, so a server restart resumes correctly.
+async function tick() {
+  if (tickRunning) return;
+  tickRunning = true;
   try {
-    campaign.sent = await sendToWhatsApp(campaign);
-    if (campaign.publishedMeta) {
-      await publishToMeta(campaign);
-    }
-    campaign.status = 'completed';
-    campaign.statusLabel = 'Concluída';
-    campaign.completedAt = new Date().toISOString();
-  } catch (error) {
-    campaign.status = 'error';
-    campaign.statusLabel = 'Falhou';
-    campaign.error = error.message;
+    const now = Date.now();
+    campaigns
+      .filter((campaign) => campaign.status === 'scheduled' && campaign.scheduledAt && Date.parse(campaign.scheduledAt) <= now)
+      .forEach((campaign) => startCampaign(campaign));
+
+    const active = campaigns.filter((campaign) => campaign.status === 'sending' && campaign.lanes);
+    await Promise.all(active.map(async (campaign) => {
+      let scheduleChanged = false;
+      campaign.lanes.filter((lane) => !lane.done).forEach((lane) => {
+        const storedSendAt = Number(lane.nextSendAt);
+        const reference = new Date(Math.max(Number.isFinite(storedSendAt) ? storedSendAt : 0, now));
+        const normalizedSendAt = nextWindowMoment(reference, campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
+        if (lane.nextSendAt !== normalizedSendAt) {
+          lane.nextSendAt = normalizedSendAt;
+          scheduleChanged = true;
+        }
+      });
+      const dueLanes = campaign.lanes.filter((lane) => !lane.done && lane.nextSendAt <= now);
+      if (!dueLanes.length) {
+        if (scheduleChanged) campaignStore.save(campaign);
+        return;
+      }
+      await Promise.all(dueLanes.map((lane) => advanceLane(campaign, lane)));
+      if (campaign.status === 'sending' && campaign.lanes.every((lane) => lane.done)) {
+        try {
+          if (campaign.publishedMeta) await publishToMeta(campaign);
+          campaign.status = 'completed';
+          campaign.statusLabel = 'Concluída';
+          campaign.completedAt = new Date().toISOString();
+        } catch (error) {
+          campaign.status = 'error';
+          campaign.statusLabel = 'Falhou';
+          campaign.error = error.message;
+        }
+      }
+      campaignStore.save(campaign);
+    }));
+  } finally {
+    tickRunning = false;
   }
-  campaignStore.save(campaign);
-  return campaign;
 }
 
 app.get('/api/health', (_req, res) => {
@@ -634,6 +701,34 @@ app.get('/api/campaigns/:id/recipients', (req, res) => {
   res.json({ campaign: { id: campaign.id, name: campaign.name, status: campaign.status, statusLabel: campaign.statusLabel }, recipients });
 });
 
+app.post('/api/campaigns/test-send', async (req, res) => {
+  try {
+    const number = campaignStore.listWppNumbers(req.user.id).find((item) => item.id === req.body?.numberId);
+    if (!number) return res.status(422).json({ error: 'Selecione um número válido para o teste.' });
+    const phone = onlyDigits(req.body?.phone);
+    if (phone.length < 8 || phone.length > 15) return res.status(422).json({ error: 'Informe um WhatsApp válido com DDI.' });
+    const type = ['text', 'image', 'video'].includes(req.body?.type) ? req.body.type : 'text';
+    const media = req.body?.media || null;
+    const rawMessage = String(req.body?.message || '').trim().slice(0, 4096);
+    if (!rawMessage && !media?.base64) return res.status(422).json({ error: 'Escreva uma mensagem ou anexe uma mídia para testar.' });
+    if (type !== 'text' && !media?.base64) return res.status(422).json({ error: 'Envie o arquivo para testar esse tipo de mensagem.' });
+    const recipient = { name: 'Teste', region: 'Brasil', phone };
+    const message = applyTemplate(rawMessage, recipient);
+    if (demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    } else if (type === 'text') {
+      await wppRequest('send-message', { phone, message }, number.session);
+    } else {
+      await wppRequest(type === 'image' ? 'send-image' : 'send-file', {
+        phone, filename: media.name || `teste.${type === 'image' ? 'jpg' : 'mp4'}`, caption: message, base64: media.base64
+      }, number.session);
+    }
+    res.json({ ok: true, demoMode });
+  } catch (error) {
+    res.status(422).json({ error: error.message });
+  }
+});
+
 app.post('/api/campaigns', async (req, res) => {
   try {
     const validated = validateCampaign(req.body, req.user.id);
@@ -652,7 +747,7 @@ app.post('/api/campaigns', async (req, res) => {
     };
     campaigns.unshift(campaign);
     campaignStore.save(campaign);
-    if (Date.parse(campaign.scheduledAt) <= Date.now()) runCampaign(campaign);
+    if (Date.parse(campaign.scheduledAt) <= Date.now()) startCampaign(campaign);
     res.status(201).json({ id: campaign.id, status: campaign.status, demoMode });
   } catch (error) {
     res.status(422).json({ error: error.message });
@@ -662,16 +757,17 @@ app.post('/api/campaigns', async (req, res) => {
 app.post('/api/campaigns/:id/launch', async (req, res) => {
   const campaign = campaigns.find((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
   if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
-  await runCampaign(campaign);
+  if (campaign.status === 'scheduled') {
+    campaign.scheduledAt = new Date().toISOString();
+    startCampaign(campaign);
+  }
+  await tick();
   res.json({ id: campaign.id, status: campaign.status, sent: campaign.sent, error: campaign.error });
 });
 
 setInterval(() => {
-  const now = Date.now();
-  campaigns
-    .filter((campaign) => campaign.status === 'scheduled' && campaign.scheduledAt && Date.parse(campaign.scheduledAt) <= now)
-    .forEach((campaign) => runCampaign(campaign));
-}, 5000);
+  tick().catch((error) => console.error('Falha ao processar disparos:', error));
+}, 500);
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 

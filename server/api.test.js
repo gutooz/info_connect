@@ -62,14 +62,15 @@ test('cadastro inicial, login e contatos persistidos', async () => {
     const firstNumber = (await numberResponse.json()).numbers[0];
     const numberId = firstNumber.id;
     const startAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const endAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    const campaignResponse = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Teste', type: 'text', messages: ['Olá {{nome}}'], recipients: [{ name: 'Cliente', phone: '5511999999999' }, { name: 'Outro', phone: '5511888888888' }], numberIds: [numberId], startAt, endAt, messageIntervalValue: '2', messageIntervalUnit: 'minutes' }) });
+    const dailyStartTime = '00:00';
+    const dailyEndTime = '23:59';
+    const campaignResponse = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Teste', type: 'text', messages: ['Olá {{nome}}'], recipients: [{ name: 'Cliente', phone: '5511999999999' }, { name: 'Outro', phone: '5511888888888' }], numberIds: [numberId], startAt, dailyStartTime, dailyEndTime, messageIntervalValue: '2', messageIntervalUnit: 'minutes' }) });
     assert.equal(campaignResponse.status, 201);
     const campaign = await campaignResponse.json();
     assert.equal(campaign.status, 'scheduled');
     const saved = await request('/api/campaigns', { headers: { Cookie: newCookie } });
     assert.equal((await saved.json())[0].delayMs, 120000);
-    const invalidInterval = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Intervalo inválido', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }, { phone: '5511888888888' }], numberIds: [numberId], startAt, endAt, messageIntervalValue: '61', messageIntervalUnit: 'minutes' }) });
+    const invalidInterval = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Intervalo inválido', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }, { phone: '5511888888888' }], numberIds: [numberId], startAt, dailyStartTime, dailyEndTime, messageIntervalValue: '61', messageIntervalUnit: 'minutes' }) });
     assert.equal(invalidInterval.status, 422);
 
     const secondUser = await request('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: newCookie }, body: JSON.stringify({ name: 'Bia', email: 'bia@example.com', password: 'second-password-123' }) });
@@ -92,7 +93,7 @@ test('cadastro inicial, login e contatos persistidos', async () => {
     assert.equal((await request('/api/integrations/wppconnect/qr?session=' + encodeURIComponent(firstNumber.session), { headers: { Cookie: secondCookie } })).status, 422);
     assert.equal((await request('/api/integrations/wppconnect/contacts?session=' + encodeURIComponent(firstNumber.session), { headers: { Cookie: secondCookie } })).status, 422);
     assert.equal((await request(`/api/campaigns/${campaign.id}/launch`, { method: 'POST', headers: { Cookie: secondCookie } })).status, 404);
-    const foreignNumber = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: secondCookie }, body: JSON.stringify({ name: 'Indevida', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }], numberIds: [numberId], startAt, endAt }) });
+    const foreignNumber = await request('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: secondCookie }, body: JSON.stringify({ name: 'Indevida', type: 'text', messages: ['Teste'], recipients: [{ phone: '5511999999999' }], numberIds: [numberId], startAt, dailyStartTime, dailyEndTime }) });
     assert.equal(foreignNumber.status, 422);
     await request(`/api/wpp-numbers/${numberId}`, { method: 'DELETE', headers: { Cookie: secondCookie } });
     assert.equal((await (await request('/api/wpp-numbers', { headers: { Cookie: newCookie } })).json()).length, 1);

@@ -137,3 +137,42 @@ test('migra dados globais para o primeiro usuário sem compartilhá-los', () => 
   reopened.close();
   fs.rmSync(directory, { recursive: true, force: true });
 });
+
+test('rastreia envio, entrega, leitura e resposta por destinatário e agrega por número', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'major-neto-recipients-'));
+  const databasePath = path.join(directory, 'recipients.sqlite');
+  const store = createCampaignStore(databasePath);
+  store.createUser({ id: 'u1', name: 'Ana', email: 'ana@example.com', passwordHash: 'hash' });
+  store.addWppNumber('u1', { id: 'n1', sessionKey: 'vendas-1', label: 'Vendas 1' });
+  store.save({ id: 'c1', ownerUserId: 'u1', name: 'Campanha teste', status: 'sending', statusLabel: 'Enviando' });
+
+  store.createRecipient({ id: 'r1', campaignId: 'c1', ownerId: 'u1', wppNumberId: 'n1', phone: '5511999999999', name: 'Cliente' });
+  store.markRecipientSent('r1', { messageId: 'msg-1', sentAt: '2026-01-01T10:00:00.000Z' });
+  store.recordAckByMessageId('msg-1', 2, '2026-01-01T10:00:05.000Z');
+  store.recordAckByMessageId('msg-1', 3, '2026-01-01T10:00:10.000Z');
+  store.recordReply({ ownerUserId: 'u1', wppNumberId: 'n1', phone: '5511999999999', repliedAt: '2026-01-01T10:01:00.000Z', replyText: 'Obrigado!' });
+
+  const recipients = store.listCampaignRecipients('u1', 'c1');
+  assert.equal(recipients.length, 1);
+  assert.equal(recipients[0].status, 'replied');
+  assert.equal(recipients[0].deliveredAt, '2026-01-01T10:00:05.000Z');
+  assert.equal(recipients[0].readAt, '2026-01-01T10:00:10.000Z');
+  assert.equal(recipients[0].repliedAt, '2026-01-01T10:01:00.000Z');
+  assert.equal(recipients[0].replyText, 'Obrigado!');
+  assert.equal(recipients[0].numberLabel, 'Vendas 1');
+
+  store.createRecipient({ id: 'r2', campaignId: 'c1', ownerId: 'u1', wppNumberId: 'n1', phone: '5511888888888', name: 'Outro' });
+  store.markRecipientFailed('r2', 'Numero invalido');
+  assert.equal(store.listCampaignRecipients('u1', 'c1').find((item) => item.id === 'r2').status, 'failed');
+
+  const stats = store.listCampaignNumberStats('u1');
+  assert.equal(stats.length, 1);
+  assert.equal(stats[0].total, 2);
+  assert.equal(stats[0].sentCount, 1);
+  assert.equal(stats[0].deliveredCount, 1);
+  assert.equal(stats[0].readCount, 1);
+  assert.equal(stats[0].repliedCount, 1);
+
+  store.close();
+  fs.rmSync(directory, { recursive: true, force: true });
+});

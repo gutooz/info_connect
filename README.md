@@ -22,6 +22,15 @@ O projeto inicia em `DEMO_MODE=true`, que permite validar o fluxo sem enviar men
 - WPPConnect Server: texto usa `POST /api/{session}/send-message`; imagem usa `send-image`; vídeo usa `send-file`, todos com `Authorization: Bearer`.
 - Meta: o servidor cria um container em `/{ig-user-id}/media` e publica em `/{ig-user-id}/media_publish`. A mídia precisa ter uma URL pública quando estiver em modo conectado (`media.publicUrl`).
 
+## Acompanhamento de entrega e resposta
+
+O Dashboard mostra, por número de WhatsApp, quantas mensagens de cada campanha foram enviadas, entregues e respondidas (com os horários), e um clique na linha abre um painel somente leitura com o detalhe por contato. Fora do `DEMO_MODE`, isso depende de o WPPConnect Server notificar o WPPConnect via webhook:
+
+- Configure `PUBLIC_BASE_URL` (URL pública deste servidor) para que, ao conectar um número, o servidor registre automaticamente `POST /api/integrations/wppconnect/webhook` como webhook da sessão.
+- Configure `WPP_WEBHOOK_SECRET` para exigir `?secret=` na chamada do webhook; sem ele, o endpoint aceita qualquer chamada (use somente em rede fechada).
+- O endpoint entende eventos `onack` (marca entregue/lido) e `onmessage` de quem não é o próprio número (marca respondido, associando à última mensagem enviada para aquele contato).
+- Em `DEMO_MODE`, não há WPPConnect real: o servidor simula a progressão enviado → entregue → lido → respondido para o dashboard ter dados de exemplo.
+
 ## Cadência e personalização
 
 Na criação da campanha, o usuário escolhe um intervalo de 1 a 3600 segundos ou de 1 a 60 minutos entre envios. Se deixar o campo vazio, os envios são distribuídos automaticamente na janela de horário. As variáveis `{{nome}}` e `{{regiao}}` são substituídas pelo nome e pela região do contato (contatos importados sem nome viram "Delivery" e sem região viram "Brasil"). A personalização por IA é opcional e usa `AI_API_KEY`, `AI_BASE_URL` e `AI_MODEL` no servidor; ela não deve ser usada para contornar políticas, limites ou bloqueios de plataformas. Envie somente para contatos que autorizaram a comunicação e mantenha uma opção de saída/opt-out.

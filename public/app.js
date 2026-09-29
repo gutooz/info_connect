@@ -3,6 +3,7 @@ const state = {
   recipients: [],
   media: null,
   campaigns: [],
+  campaignNumberRows: [],
   health: { demoMode: true },
   contactsFile: null,
   wppNumbers: [],
@@ -15,6 +16,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const toast = (message) => { const element = $('#toast'); element.textContent = message; element.classList.add('show'); setTimeout(() => element.classList.remove('show'), 3200); };
 let wppStatusTimer = null;
+let dashboardPollTimer = null;
 let authMode = 'login';
 
 function setAuthMode(mode) {
@@ -34,10 +36,15 @@ function setAuthMode(mode) {
   $('#auth-error').textContent = '';
 }
 
+const KNOWN_PAGES = ['dashboard', 'campaigns', 'whatsapp', 'contacts'];
+
 function showApp(user) {
   $('#auth-screen').classList.add('hidden');
   $('#app-shell').classList.remove('hidden');
   $('#current-user-name').textContent = user.name;
+  let savedPage = 'dashboard';
+  try { savedPage = localStorage.getItem('currentPage') || 'dashboard'; } catch { /* armazenamento indisponível */ }
+  showPage(KNOWN_PAGES.includes(savedPage) ? savedPage : 'dashboard');
   void loadData();
 }
 
@@ -118,6 +125,7 @@ function renderNumberChecklist() {
   if (!container) return;
   if (!state.wppNumbers.length) {
     container.innerHTML = '<div class="empty-state"><strong>Nenhum número cadastrado</strong><span>Cadastre um número na aba WhatsApp antes de criar uma campanha.</span></div>';
+    renderSendEstimate();
     return;
   }
   const previouslyChecked = new Set([...container.querySelectorAll('input:checked')].map((input) => input.value));
@@ -127,6 +135,99 @@ function renderNumberChecklist() {
       <span><strong>${escapeHtml(number.label)}</strong><small>sessão: ${escapeHtml(number.sessionKey || number.session)}</small></span>
     </label>
   `).join('');
+  renderSendEstimate();
+}
+
+function parseTimeInputMinutes(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+// Anti-ban safety valve, mirrored from the server: every lane takes a 15-minute break after
+// each burst of 40 messages, on top of pausing outside the daily window.
+const BURST_LIMIT = 40;
+const BURST_PAUSE_MS = 15 * 60 * 1000;
+
+// Simulates one lane's sends inside a single day's window (start at t=0) to count how many
+// messages fit, including the periodic bursts pauses — mirrors the server's advanceLane logic.
+function simulateLaneCapacityPerDay(delayMs, windowMs) {
+  let t = 0;
+  let count = 0;
+  let sinceBreak = 0;
+  while (t < windowMs) {
+    count += 1;
+    sinceBreak += 1;
+    if (sinceBreak >= BURST_LIMIT) {
+      sinceBreak = 0;
+      t += BURST_PAUSE_MS;
+    } else {
+      t += delayMs;
+    }
+  }
+  return count;
+}
+
+// Mirrors the server's daily send window: a lane sends every `delayMs` (pausing 15min every
+// 40 messages) until the window closes, then resumes at the next day's start.
+function computeSendEstimate() {
+  const totalContacts = state.recipients.length;
+  if (!totalContacts) return { status: 'empty' };
+
+  const intervalRaw = $('#message-interval').value.trim();
+  if (!intervalRaw) return { status: 'missing-interval' };
+  const intervalValue = Number(intervalRaw);
+  const intervalUnit = $('#message-interval-unit').value;
+  if (!Number.isFinite(intervalValue) || intervalValue < 1) return { status: 'invalid-interval' };
+
+  const dailyStartMinutes = parseTimeInputMinutes($('#daily-start').value);
+  const dailyEndMinutes = parseTimeInputMinutes($('#daily-end').value);
+  if (dailyStartMinutes === null || dailyEndMinutes === null || dailyEndMinutes <= dailyStartMinutes) return { status: 'invalid-window' };
+
+  const checkedNumbers = $$('#campaign-number-checklist input:checked').length;
+  const laneCount = checkedNumbers || Math.max(state.wppNumbers.length, 1);
+
+  const delayMs = intervalValue * (intervalUnit === 'minutes' ? 60000 : 1000);
+  const windowMs = (dailyEndMinutes - dailyStartMinutes) * 60000;
+  const capacityPerDay = simulateLaneCapacityPerDay(delayMs, windowMs);
+  const contactsPerLane = Math.ceil(totalContacts / laneCount);
+  const daysNeeded = Math.max(1, Math.ceil(contactsPerLane / capacityPerDay));
+
+  return { status: 'ok', totalContacts, laneCount, contactsPerLane, capacityPerDay, daysNeeded, windowHours: (dailyEndMinutes - dailyStartMinutes) / 60 };
+}
+
+function renderSendEstimate() {
+  const box = $('#send-estimate');
+  if (!box) return;
+  const estimate = computeSendEstimate();
+  box.classList.remove('warning');
+  if (estimate.status === 'empty') {
+    box.innerHTML = '<p>Adicione contatos ao público para calcular a previsão de envio.</p>';
+    return;
+  }
+  if (estimate.status === 'missing-interval') {
+    box.innerHTML = '<p>Informe o intervalo entre mensagens para calcular quantos dias o disparo vai levar.</p>';
+    return;
+  }
+  if (estimate.status === 'invalid-interval') {
+    box.innerHTML = '<p>Informe um intervalo válido entre mensagens.</p>';
+    return;
+  }
+  if (estimate.status === 'invalid-window') {
+    box.classList.add('warning');
+    box.innerHTML = '<strong>Horário diário inválido</strong><p>O horário de término precisa ser depois do horário de início.</p>';
+    return;
+  }
+  const { totalContacts, laneCount, contactsPerLane, capacityPerDay, daysNeeded, windowHours } = estimate;
+  const windowLabel = Number.isInteger(windowHours) ? windowHours : windowHours.toFixed(1);
+  const laneNote = laneCount > 1
+    ? `Dividido entre ${laneCount} números: cada um envia ${contactsPerLane} contato${contactsPerLane === 1 ? '' : 's'} ao mesmo tempo.`
+    : 'Cadastre e selecione mais números para dividir o envio e reduzir o tempo total.';
+  box.classList.toggle('warning', daysNeeded > 1);
+  box.innerHTML = `<strong>${daysNeeded === 1 ? 'O envio cabe em 1 dia' : `O envio vai levar ${daysNeeded} dias`}</strong><p>${totalContacts} contato${totalContacts === 1 ? '' : 's'} · até ${capacityPerDay} mensagens por número em cada janela de ${windowLabel}h.</p><p>${laneNote}</p><p>A cada ${BURST_LIMIT} mensagens, cada número pausa 15 minutos automaticamente antes de continuar.</p>`;
 }
 
 async function checkWppStatuses() {
@@ -180,14 +281,82 @@ function renderMetrics() {
 function renderCampaigns() {
   $('#campaign-count').textContent = state.campaigns.length;
   renderMetrics();
-  if (!state.campaigns.length) {
-    $('#campaign-table-body').innerHTML = '<tr><td colspan="6"><div class="empty-state"><strong>Nenhuma campanha criada</strong><span>Crie sua primeira campanha para acompanhar os disparos aqui.</span></div></td></tr>';
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function recipientStatusLabel(status) {
+  return { pending: 'Pendente', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', replied: 'Respondida', failed: 'Falhou' }[status] || status;
+}
+
+async function loadCampaignNumberStats() {
+  try {
+    const response = await fetch('/api/dashboard/campaign-numbers');
+    state.campaignNumberRows = response.ok ? await response.json() : [];
+  } catch { state.campaignNumberRows = []; }
+  renderCampaignNumberTable();
+}
+
+function startDashboardPolling() {
+  if (dashboardPollTimer) clearInterval(dashboardPollTimer);
+  dashboardPollTimer = setInterval(loadCampaignNumberStats, 10000);
+}
+
+function renderCampaignNumberTable() {
+  const body = $('#campaign-number-table-body');
+  if (!body) return;
+  const rows = state.campaignNumberRows;
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6"><div class="empty-state"><strong>Nenhum disparo registrado</strong><span>Assim que uma campanha começar a enviar, o histórico por número aparece aqui.</span></div></td></tr>';
     return;
   }
-  $('#campaign-table-body').innerHTML = state.campaigns.map((campaign) => {
-    const [icon, label, typeClass] = formatCampaignType(campaign.type);
-    return `<tr><td><div class="campaign-name-cell"><span class="campaign-thumb ${typeClass}">${icon}</span>${escapeHtml(campaign.name)}</div></td><td><div class="channel-cell"><span class="channel-dot">◉</span> WhatsApp ${campaign.publishedMeta ? '<span class="channel-dot meta">∞</span>' : ''}</div></td><td>${campaign.audience || 0} contatos</td><td>${campaign.sent || 0} / ${campaign.audience || 0}</td><td><span class="status-pill status-${formatStatus(campaign.status)}">${escapeHtml(campaign.statusLabel || label)}</span></td><td>${escapeHtml(campaign.createdAt || 'Agora')}</td></tr>`;
+  body.innerHTML = rows.map((row) => {
+    const lastActivity = row.lastRepliedAt || row.lastReadAt || row.lastDeliveredAt || row.lastSentAt;
+    return `<tr class="clickable-row" data-campaign-id="${row.campaignId}" data-number-id="${row.wppNumberId || ''}">
+      <td>${escapeHtml(row.numberLabel)}</td>
+      <td>${escapeHtml(row.campaignName)}</td>
+      <td>${row.sentCount}${row.lastSentAt ? `<small class="cell-caption">${formatDateTime(row.lastSentAt)}</small>` : ''}</td>
+      <td>${row.deliveredCount}${row.lastDeliveredAt ? `<small class="cell-caption">${formatDateTime(row.lastDeliveredAt)}</small>` : ''}</td>
+      <td>${row.repliedCount}${row.lastRepliedAt ? `<small class="cell-caption">${formatDateTime(row.lastRepliedAt)}</small>` : ''}</td>
+      <td>${formatDateTime(lastActivity)}</td>
+    </tr>`;
   }).join('');
+}
+
+async function openCampaignDetail(campaignId, numberId) {
+  try {
+    const url = `/api/campaigns/${campaignId}/recipients${numberId ? `?numberId=${encodeURIComponent(numberId)}` : ''}`;
+    const response = await fetch(url);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível carregar os detalhes.');
+    $('#campaign-detail-title').textContent = result.campaign.name;
+    $('#campaign-detail-subtitle').textContent = `${result.recipients.length} contato${result.recipients.length === 1 ? '' : 's'} nesta visão · somente leitura`;
+    const summary = { delivered: 0, replied: 0, failed: 0 };
+    result.recipients.forEach((recipient) => {
+      if (recipient.deliveredAt) summary.delivered += 1;
+      if (recipient.repliedAt) summary.replied += 1;
+      if (recipient.status === 'failed') summary.failed += 1;
+    });
+    $('#campaign-detail-summary').innerHTML = `
+      <span class="stat-chip">${summary.delivered} entregue${summary.delivered === 1 ? '' : 's'}</span>
+      <span class="stat-chip">${summary.replied} respondida${summary.replied === 1 ? '' : 's'}</span>
+      ${summary.failed ? `<span class="stat-chip warn">${summary.failed} falhou${summary.failed === 1 ? '' : 'ram'}</span>` : ''}
+    `;
+    $('#campaign-detail-body').innerHTML = result.recipients.map((recipient) => `<tr>
+      <td>${escapeHtml(recipient.name || 'Contato')}</td>
+      <td>${escapeHtml(recipient.phone)}</td>
+      <td><span class="status-pill status-${recipient.status}">${recipientStatusLabel(recipient.status)}</span></td>
+      <td>${formatDateTime(recipient.sentAt)}</td>
+      <td>${formatDateTime(recipient.deliveredAt)}</td>
+      <td>${formatDateTime(recipient.repliedAt)}</td>
+    </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state"><strong>Sem contatos nesta visão</strong></div></td></tr>';
+    $('#campaign-detail-modal').classList.remove('hidden');
+  } catch (error) { toast(error.message); }
 }
 
 function renderAudience() {
@@ -201,6 +370,7 @@ function renderAudience() {
   $('#publish-button').disabled = !count;
   $('#contact-list').innerHTML = state.recipients.map((recipient) => `<div class="contact-row"><span class="list-icon">♧</span><span><strong>${escapeHtml(recipient.name)}</strong><small>${escapeHtml(recipient.phone)}</small></span></div>`).join('');
   renderContactsPage();
+  renderSendEstimate();
 }
 
 function renderContactsPage() {
@@ -251,7 +421,7 @@ function addMessageVariant() {
   block.innerHTML = `<label class="field-label variant-label">${variantLabel(index)}</label>
     <div class="message-editor">
       <textarea class="variant-textarea" maxlength="4096" placeholder="Escreva outra versão da mensagem..."></textarea>
-      <div class="editor-footer"><span class="variant-char-count">0 / 4096</span><button type="button" class="editor-action remove-variant" aria-label="Remover variação">×</button></div>
+      <div class="editor-footer"><span class="variant-char-count">0 / 4096</span><div><button class="editor-action insert-variable" type="button" data-variable="nome">{{nome}}</button><button class="editor-action insert-variable" type="button" data-variable="regiao">{{regiao}}</button><button type="button" class="editor-action remove-variant" aria-label="Remover variação">×</button></div></div>
     </div>`;
   container.appendChild(block);
   const textarea = block.querySelector('textarea');
@@ -269,6 +439,21 @@ function renumberVariants() {
 function getMessageVariants() {
   return $$('#message-variant-list .variant-textarea').map((textarea) => textarea.value.trim()).filter(Boolean);
 }
+
+function insertVariable(textarea, token) {
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  textarea.setRangeText(token, start, end, 'end');
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  textarea.focus();
+}
+
+$('#message-variant-list').addEventListener('click', (event) => {
+  const button = event.target.closest('.insert-variable');
+  if (!button) return;
+  const textarea = button.closest('.message-editor').querySelector('textarea');
+  insertVariable(textarea, `{{${button.dataset.variable}}}`);
+});
 
 function fileToDataUrl(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
@@ -294,13 +479,9 @@ async function loadData() {
     state.recipients = await contactsResponse.json();
     renderAudience();
     await loadWppNumbers();
-    const aiToggle = $('#ai-personalization');
-    if (aiToggle) {
-      aiToggle.disabled = !state.health.ai;
-      $('#ai-status').textContent = state.health.ai ? 'Token configurado no servidor' : 'Configure AI_API_KEY no .env';
-    }
-    $('#status-text').textContent = state.health.demoMode ? 'Modo demonstração' : 'Tudo operando';
-  } catch { $('#status-text').textContent = 'Modo local'; }
+    await loadCampaignNumberStats();
+    startDashboardPolling();
+  } catch { /* falha ao carregar dados iniciais; a página segue com o estado padrão */ }
   renderCampaigns();
 }
 
@@ -310,27 +491,30 @@ async function publishCampaign() {
   const publicUrlInput = $('#public-url');
   if (publicUrlInput && state.media) state.media.publicUrl = publicUrlInput.value.trim();
   const startAt = $('#campaign-start').value;
-  const endAt = $('#campaign-end').value;
+  const dailyStartTime = $('#daily-start').value;
+  const dailyEndTime = $('#daily-end').value;
   const messageIntervalValue = $('#message-interval').value.trim();
   const messageIntervalUnit = $('#message-interval-unit').value;
   const numberIds = $$('#campaign-number-checklist input:checked').map((input) => input.value);
   if (!state.recipients.length) return toast('Adicione ao menos um contato ao público.');
   if (!name || (!messages.length && !state.media)) return toast('Preencha o nome e ao menos uma mensagem (ou mídia).');
-  if (!startAt || !endAt) return toast('Informe o horário de início e término.');
-  if (new Date(endAt) <= new Date(startAt)) return toast('O término precisa ser depois do início.');
-  if (messageIntervalValue) {
-    const value = Number(messageIntervalValue);
-    if (!Number.isSafeInteger(value) || value < 1 || value > (messageIntervalUnit === 'minutes' ? 60 : 3600)) {
-      return toast('Escolha de 1 a 3600 segundos ou de 1 a 60 minutos.');
-    }
+  if (!startAt) return toast('Informe a data e hora de início da campanha.');
+  if (!dailyStartTime || !dailyEndTime) return toast('Informe o horário diário de início e término dos disparos.');
+  if (dailyEndTime <= dailyStartTime) return toast('O horário diário de término precisa ser depois do início.');
+  if (!messageIntervalValue) return toast('Informe o intervalo entre mensagens.');
+  const intervalValue = Number(messageIntervalValue);
+  if (!Number.isSafeInteger(intervalValue) || intervalValue < 1 || intervalValue > (messageIntervalUnit === 'minutes' ? 60 : 3600)) {
+    return toast('Escolha de 1 a 3600 segundos ou de 1 a 60 minutos.');
   }
   if (state.wppNumbers.length && !numberIds.length) return toast('Selecione ao menos um número para o disparo.');
+  const estimate = computeSendEstimate();
   const button = $('#publish-button'); button.disabled = true; button.innerHTML = '<span>◌</span> Publicando...';
   try {
-    const response = await fetch('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, endAt, numberIds, messageIntervalValue, messageIntervalUnit, aiPersonalization: $('#ai-personalization').checked }) });
+    const response = await fetch('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, dailyStartTime, dailyEndTime, numberIds, messageIntervalValue, messageIntervalUnit }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível criar a campanha.');
-    toast(state.health.demoMode ? 'Campanha simulada com sucesso.' : 'Campanha agendada com sucesso.');
+    const forecast = estimate.status === 'ok' ? ` Previsão: ${estimate.daysNeeded} dia${estimate.daysNeeded === 1 ? '' : 's'} para alcançar todo o público.` : '';
+    toast((state.health.demoMode ? 'Campanha simulada com sucesso.' : 'Campanha agendada com sucesso.') + forecast);
     await new Promise((resolve) => setTimeout(resolve, 500));
     await loadData();
   } catch (error) { toast(error.message); }
@@ -342,6 +526,7 @@ function showPage(view) {
   $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === view));
   const labels = { dashboard: 'Dashboard', campaigns: 'Campanhas', whatsapp: 'WhatsApp', contacts: 'Contatos' };
   $('#breadcrumb-current').textContent = labels[view];
+  try { localStorage.setItem('currentPage', view); } catch { /* armazenamento indisponível */ }
 }
 
 function handleContactsFile(file) {
@@ -527,20 +712,6 @@ async function extractContacts() {
   finally { button.disabled = false; button.textContent = 'Extrair contatos do WhatsApp'; }
 }
 
-const campaignControls = document.createElement('div');
-campaignControls.className = 'campaign-controls';
-const aiLabel = document.createElement('label');
-aiLabel.className = 'ai-option';
-const aiToggle = document.createElement('input');
-aiToggle.type = 'checkbox';
-aiToggle.id = 'ai-personalization';
-aiLabel.append(aiToggle, document.createTextNode(' Personalizar a mensagem com IA'));
-const aiStatus = document.createElement('small');
-aiStatus.id = 'ai-status';
-aiStatus.textContent = 'Configure AI_API_KEY no .env';
-campaignControls.append(aiLabel, aiStatus);
-$('#publish-button').insertAdjacentElement('beforebegin', campaignControls);
-
 const extractButton = document.createElement('button');
 extractButton.type = 'button';
 extractButton.id = 'extract-contacts';
@@ -553,6 +724,25 @@ $('#message').addEventListener('input', updatePreview);
 $('#new-campaign-button').addEventListener('click', () => { showPage('campaigns'); $('#campaign-name').focus(); });
 $('#add-message-variant').addEventListener('click', addMessageVariant);
 $('#publish-button').addEventListener('click', publishCampaign);
+$('#send-test-button').addEventListener('click', async () => {
+  const phone = $('#test-phone').value.replace(/\D/g, '');
+  if (phone.length < 8) return toast('Informe um WhatsApp válido com DDI.');
+  const message = getMessageVariants()[0] || '';
+  const publicUrlInput = $('#public-url');
+  if (publicUrlInput && state.media) state.media.publicUrl = publicUrlInput.value.trim();
+  if (!message && !state.media) return toast('Escreva uma mensagem ou anexe uma mídia para testar.');
+  const checkedNumberIds = $$('#campaign-number-checklist input:checked').map((input) => input.value);
+  const numberId = checkedNumberIds[0] || state.wppNumbers[0]?.id;
+  if (!numberId) return toast('Cadastre um número do WhatsApp antes de testar.');
+  const button = $('#send-test-button'); button.disabled = true; button.textContent = 'Enviando...';
+  try {
+    const response = await fetch('/api/campaigns/test-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: state.type, message, media: state.media, numberId, phone }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível enviar o teste.');
+    toast(result.demoMode ? 'Teste simulado (modo demonstração).' : 'Mensagem de teste enviada.');
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.textContent = 'Enviar teste'; }
+});
 $('#upload-trigger').addEventListener('click', () => $('#media-file').click());
 $('#media-file').addEventListener('change', (event) => handleFile(event.target.files[0]));
 $('#remove-file').addEventListener('click', () => { state.media = null; $('#media-file').value = ''; $('#upload-trigger').classList.remove('hidden'); $('#file-preview').classList.add('hidden'); updatePreview(); });
@@ -562,6 +752,12 @@ $('#upload-area').addEventListener('drop', (event) => handleFile(event.dataTrans
 $('#open-contacts').addEventListener('click', () => $('#contacts-modal').classList.remove('hidden'));
 $('#edit-audience').addEventListener('click', () => $('#contacts-modal').classList.remove('hidden'));
 $('#close-contacts').addEventListener('click', () => $('#contacts-modal').classList.add('hidden'));
+$('#campaign-number-table-body').addEventListener('click', (event) => {
+  const row = event.target.closest('tr[data-campaign-id]');
+  if (!row) return;
+  openCampaignDetail(row.dataset.campaignId, row.dataset.numberId);
+});
+$('#close-campaign-detail').addEventListener('click', () => $('#campaign-detail-modal').classList.add('hidden'));
 $('#add-contact').addEventListener('click', async () => {
   const name = $('#contact-name').value.trim();
   const phone = $('#contact-phone').value.replace(/\D/g, '');
@@ -594,5 +790,11 @@ $('#wpp-number-list').addEventListener('click', (event) => {
   if (action === 'connect') connectWppNumber(row.dataset.id);
   if (action === 'remove') removeWppNumber(row.dataset.id);
 });
+$('#message-interval').addEventListener('input', renderSendEstimate);
+$('#message-interval-unit').addEventListener('change', renderSendEstimate);
+$('#daily-start').addEventListener('change', renderSendEstimate);
+$('#daily-end').addEventListener('change', renderSendEstimate);
+$('#campaign-start').addEventListener('change', renderSendEstimate);
+$('#campaign-number-checklist').addEventListener('change', renderSendEstimate);
 if ($('#message').value.includes('\\n')) $('#message').value = $('#message').value.replace(/\\n/g, '\n');
 renderAudience(); updatePreview(); initializeAuth();
