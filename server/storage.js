@@ -165,6 +165,10 @@ function createCampaignStore(databasePath) {
         WHERE campaigns.owner_user_id = excluded.owner_user_id`).run(String(campaign.id), campaign.ownerUserId, JSON.stringify(campaign));
       if (!result.changes) throw new Error('Campanha pertence a outro usuario.');
     },
+    remove(ownerId, id) {
+      const result = db.prepare('DELETE FROM campaigns WHERE owner_user_id = ? AND id = ?').run(ownerId, id);
+      return result.changes > 0;
+    },
     findNumberBySession(session) {
       return db.prepare(`SELECT id, owner_user_id AS ownerUserId, label, session, session_key AS sessionKey
         FROM wpp_numbers WHERE session = ?`).get(session);

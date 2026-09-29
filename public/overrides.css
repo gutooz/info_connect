@@ -5,7 +5,8 @@
 .qr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}.qr-actions .button{margin-top:0}.button-secondary{background:#edf7f5;color:#267f73;border:1px solid #cce5df}.button-secondary:hover{background:#e1f2ee}
 .integration-badge{display:inline-flex;align-items:center;gap:7px;border-radius:99px;padding:7px 10px;font-size:10px;font-weight:700;white-space:nowrap}.integration-badge i{width:6px;height:6px;border-radius:50%;display:inline-block}.integration-badge.pending{background:#fff3dc;color:#b77b20}.integration-badge.pending i{background:#e6a235}.integration-badge.connected{background:#e5f6f0;color:#279b81}.integration-badge.connected i{background:#279b81}.qr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}.qr-actions .button{margin-top:0}.button-secondary{background:#edf7f5;color:#267f73;border:1px solid #cce5df}.button-secondary:hover{background:#e1f2ee}
 
-/* Compact layout: fit the Campanhas page in one viewport, no page scroll */
+/* Compact layout: fit the Campanhas page in one viewport, no page scroll (desktop only, so phones keep the roomier mobile layout from styles.css) */
+@media(min-width:721px){
 .main-content{max-height:100vh;overflow-y:auto}
 .topbar{height:32px}
 .page-heading{padding:4px 0 5px;align-items:center}
@@ -69,6 +70,7 @@ td{padding:5px 12px}
 .empty-state strong{font-size:10px;margin-bottom:1px}
 .empty-state span{font-size:9px}
 .footer{margin:4px 2px 0}
+}
 /* Acesso */
 .auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f3f7f6; }
 .auth-screen.hidden, .app-shell.hidden, .auth-card .hidden { display: none !important; }
@@ -133,3 +135,13 @@ td{padding:5px 12px}
 .status-read{background:#d9f0ff;color:#1f7bab}
 .status-replied{background:#e5f6f0;color:#0f8f6b}
 .status-failed{background:#ffebe7;color:#d26e5b}
+.status-scheduled{background:#eef1f2;color:#8b959b}
+.status-sending{background:#eee8ff;color:#8062c5}
+.status-completed{background:#e5f6f0;color:#279b81}
+.status-paused{background:#fff3dc;color:#b77b20}
+.status-error{background:#ffebe7;color:#d26e5b}
+.campaign-name-cell{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.row-actions{display:flex;align-items:center;gap:2px}
+.row-actions .icon-button{width:26px;height:26px;font-size:14px}
+.row-actions .icon-button.danger{color:#b7838a}
+.row-actions .icon-button.danger:hover{background:#fbeceb;color:#a2454f}

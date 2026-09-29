@@ -571,9 +571,12 @@ app.post('/api/contacts/import', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(422).json({ error: 'Selecione uma planilha.' });
     const imported = await parseSpreadsheet(req.file);
     const unique = imported.filter((contact, index, list) => list.findIndex((item) => item.phone === contact.phone) === index);
-    campaignStore.saveContacts(req.user.id, unique);
-    const numbers = campaignStore.assignContactsRoundRobin(req.user.id, unique.map((contact) => contact.phone));
-    res.json({ count: unique.length, contacts: campaignStore.listContacts(req.user.id), numbers });
+    const existingPhones = new Set(campaignStore.listContacts(req.user.id).map((contact) => contact.phone));
+    const fresh = unique.filter((contact) => !existingPhones.has(contact.phone));
+    const skipped = unique.length - fresh.length;
+    campaignStore.saveContacts(req.user.id, fresh);
+    const numbers = campaignStore.assignContactsRoundRobin(req.user.id, fresh.map((contact) => contact.phone));
+    res.json({ count: fresh.length, skipped, contacts: campaignStore.listContacts(req.user.id), numbers });
   } catch (error) {
     res.status(422).json({ error: `Não foi possível ler a planilha: ${error.message}` });
   }
@@ -765,6 +768,69 @@ app.post('/api/campaigns/:id/launch', async (req, res) => {
   }
   await tick();
   res.json({ id: campaign.id, status: campaign.status, sent: campaign.sent, error: campaign.error });
+});
+
+app.get('/api/campaigns/:id', (req, res) => {
+  const campaign = campaigns.find((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
+  if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+  const { ownerUserId, ...safe } = campaign;
+  res.json(safe);
+});
+
+app.put('/api/campaigns/:id', (req, res) => {
+  const campaign = campaigns.find((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
+  if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+  if (!['scheduled', 'paused'].includes(campaign.status)) {
+    return res.status(422).json({ error: 'Só é possível editar campanhas agendadas ou pausadas.' });
+  }
+  try {
+    const validated = validateCampaign(req.body, req.user.id);
+    Object.assign(campaign, validated, { media: req.body.media || null, audience: validated.recipients.length });
+    campaignStore.save(campaign);
+    res.json({ id: campaign.id, status: campaign.status });
+  } catch (error) {
+    res.status(422).json({ error: error.message });
+  }
+});
+
+app.delete('/api/campaigns/:id', (req, res) => {
+  const index = campaigns.findIndex((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
+  if (index === -1) return res.status(404).json({ error: 'Campanha não encontrada.' });
+  campaignStore.remove(req.user.id, req.params.id);
+  campaigns.splice(index, 1);
+  res.json({ ok: true });
+});
+
+app.post('/api/campaigns/:id/pause', (req, res) => {
+  const campaign = campaigns.find((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
+  if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+  if (!['scheduled', 'sending'].includes(campaign.status)) {
+    return res.status(422).json({ error: 'Esta campanha não pode ser pausada.' });
+  }
+  campaign.pausedFrom = campaign.status;
+  campaign.status = 'paused';
+  campaign.statusLabel = 'Pausada';
+  campaignStore.save(campaign);
+  res.json({ id: campaign.id, status: campaign.status });
+});
+
+app.post('/api/campaigns/:id/resume', async (req, res) => {
+  const campaign = campaigns.find((item) => item.id === req.params.id && item.ownerUserId === req.user.id);
+  if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+  if (campaign.status !== 'paused') return res.status(422).json({ error: 'Esta campanha não está pausada.' });
+  const resumeTo = campaign.pausedFrom || 'scheduled';
+  delete campaign.pausedFrom;
+  if (resumeTo === 'sending' && campaign.lanes) {
+    campaign.status = 'sending';
+    campaign.statusLabel = 'Enviando';
+  } else {
+    campaign.status = 'scheduled';
+    campaign.statusLabel = 'Agendada';
+    if (Date.parse(campaign.scheduledAt) <= Date.now()) startCampaign(campaign);
+  }
+  campaignStore.save(campaign);
+  await tick();
+  res.json({ id: campaign.id, status: campaign.status });
 });
 
 setInterval(() => {

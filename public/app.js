@@ -9,7 +9,8 @@ const state = {
   wppNumbers: [],
   wppNumberStatus: {},
   activeQrNumberId: null,
-  qrPendingNumberId: null
+  qrPendingNumberId: null,
+  editingCampaignId: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -307,23 +308,38 @@ function startDashboardPolling() {
   dashboardPollTimer = setInterval(loadCampaignNumberStats, 10000);
 }
 
+function campaignActionButtonsHtml(status) {
+  const buttons = [];
+  if (status === 'paused') {
+    buttons.push('<button class="icon-button" data-action="resume" type="button" aria-label="Retomar campanha" title="Retomar">▶</button>');
+  } else if (status === 'scheduled' || status === 'sending') {
+    buttons.push('<button class="icon-button" data-action="pause" type="button" aria-label="Pausar campanha" title="Pausar">❚❚</button>');
+  }
+  if (status === 'scheduled' || status === 'paused') {
+    buttons.push('<button class="icon-button" data-action="edit" type="button" aria-label="Editar campanha" title="Editar">✎</button>');
+  }
+  buttons.push('<button class="icon-button danger" data-action="delete" type="button" aria-label="Excluir campanha" title="Excluir">×</button>');
+  return buttons.join('');
+}
+
 function renderCampaignNumberTable() {
   const body = $('#campaign-number-table-body');
   if (!body) return;
   const rows = state.campaignNumberRows;
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6"><div class="empty-state"><strong>Nenhum disparo registrado</strong><span>Assim que uma campanha começar a enviar, o histórico por número aparece aqui.</span></div></td></tr>';
+    body.innerHTML = '<tr><td colspan="7"><div class="empty-state"><strong>Nenhum disparo registrado</strong><span>Assim que uma campanha começar a enviar, o histórico por número aparece aqui.</span></div></td></tr>';
     return;
   }
   body.innerHTML = rows.map((row) => {
     const lastActivity = row.lastRepliedAt || row.lastReadAt || row.lastDeliveredAt || row.lastSentAt;
     return `<tr class="clickable-row" data-campaign-id="${row.campaignId}" data-number-id="${row.wppNumberId || ''}">
       <td>${escapeHtml(row.numberLabel)}</td>
-      <td>${escapeHtml(row.campaignName)}</td>
+      <td><div class="campaign-name-cell"><span>${escapeHtml(row.campaignName)}</span><span class="status-pill status-${row.campaignStatus}">${escapeHtml(row.campaignStatusLabel || row.campaignStatus)}</span></div></td>
       <td>${row.sentCount}${row.lastSentAt ? `<small class="cell-caption">${formatDateTime(row.lastSentAt)}</small>` : ''}</td>
       <td>${row.deliveredCount}${row.lastDeliveredAt ? `<small class="cell-caption">${formatDateTime(row.lastDeliveredAt)}</small>` : ''}</td>
       <td>${row.repliedCount}${row.lastRepliedAt ? `<small class="cell-caption">${formatDateTime(row.lastRepliedAt)}</small>` : ''}</td>
       <td>${formatDateTime(lastActivity)}</td>
+      <td><div class="row-actions">${campaignActionButtonsHtml(row.campaignStatus)}</div></td>
     </tr>`;
   }).join('');
 }
@@ -356,6 +372,123 @@ async function openCampaignDetail(campaignId, numberId) {
       <td>${formatDateTime(recipient.repliedAt)}</td>
     </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state"><strong>Sem contatos nesta visão</strong></div></td></tr>';
     $('#campaign-detail-modal').classList.remove('hidden');
+  } catch (error) { toast(error.message); }
+}
+
+async function pauseCampaign(id) {
+  try {
+    const response = await fetch(`/api/campaigns/${id}/pause`, { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível pausar a campanha.');
+    toast('Campanha pausada.');
+    await loadCampaignNumberStats();
+  } catch (error) { toast(error.message); }
+}
+
+async function resumeCampaign(id) {
+  try {
+    const response = await fetch(`/api/campaigns/${id}/resume`, { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível retomar a campanha.');
+    toast('Campanha retomada.');
+    await loadCampaignNumberStats();
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteCampaign(id) {
+  if (!confirm('Excluir esta campanha? Essa ação não pode ser desfeita.')) return;
+  try {
+    const response = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível excluir a campanha.');
+    if (state.editingCampaignId === id) cancelEditCampaign();
+    toast('Campanha excluída.');
+    await loadCampaignNumberStats();
+    await loadData();
+  } catch (error) { toast(error.message); }
+}
+
+function cancelEditCampaign() {
+  state.editingCampaignId = null;
+  $('#composer-title').textContent = 'Nova campanha';
+  $('#composer-subtitle').textContent = 'Configure o disparo e publique quando estiver pronto.';
+  $('#cancel-edit-campaign').classList.add('hidden');
+  $('#publish-button').innerHTML = '<span>↗</span> Publicar campanha';
+}
+
+function toDatetimeLocalValue(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function minutesToTimeValue(minutes) {
+  const hours = Math.floor((minutes || 0) / 60);
+  const mins = (minutes || 0) % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function setMessageVariants(messages) {
+  const container = $('#message-variant-list');
+  while (container.children.length > 1) container.lastElementChild.remove();
+  const list = messages && messages.length ? messages : [''];
+  const firstTextarea = $('#message');
+  firstTextarea.value = list[0] || '';
+  firstTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+  for (let index = 1; index < list.length; index += 1) {
+    addMessageVariant();
+    const textareas = $$('#message-variant-list .variant-textarea');
+    textareas[textareas.length - 1].value = list[index];
+    textareas[textareas.length - 1].dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+async function editCampaign(id) {
+  try {
+    const response = await fetch(`/api/campaigns/${id}`);
+    const campaign = await response.json();
+    if (!response.ok) throw new Error(campaign.error || 'Não foi possível carregar a campanha.');
+    if (!['scheduled', 'paused'].includes(campaign.status)) {
+      return toast('Só é possível editar campanhas agendadas ou pausadas.');
+    }
+    showPage('campaigns');
+    setType(campaign.type || 'text');
+    $('#campaign-name').value = campaign.name || '';
+    setMessageVariants(campaign.messages && campaign.messages.length ? campaign.messages : [campaign.message || '']);
+    state.media = campaign.media || null;
+    if (state.media) {
+      $('#upload-trigger').classList.add('hidden');
+      $('#file-preview').classList.remove('hidden');
+      $('#file-name').textContent = state.media.name || 'arquivo selecionado';
+      $('.file-type').textContent = campaign.type === 'image' ? 'IMG' : 'MP4';
+    } else {
+      $('#media-file').value = '';
+      $('#upload-trigger').classList.remove('hidden');
+      $('#file-preview').classList.add('hidden');
+    }
+    const publicUrlInput = $('#public-url');
+    if (publicUrlInput) publicUrlInput.value = state.media?.publicUrl || '';
+    updatePreview();
+    $('#campaign-start').value = toDatetimeLocalValue(campaign.scheduledAt);
+    $('#daily-start').value = minutesToTimeValue(campaign.dailyStartMinutes);
+    $('#daily-end').value = minutesToTimeValue(campaign.dailyEndMinutes);
+    const delayMs = campaign.delayMs || 3000;
+    if (delayMs % 60000 === 0 && delayMs / 60000 <= 60) {
+      $('#message-interval-unit').value = 'minutes';
+      $('#message-interval').value = String(delayMs / 60000);
+    } else {
+      $('#message-interval-unit').value = 'seconds';
+      $('#message-interval').value = String(Math.round(delayMs / 1000));
+    }
+    $$('#campaign-number-checklist input').forEach((input) => { input.checked = (campaign.numberIds || []).includes(input.value); });
+    renderSendEstimate();
+    state.editingCampaignId = campaign.id;
+    $('#composer-title').textContent = 'Editar campanha';
+    $('#composer-subtitle').textContent = 'Altere o disparo e salve para atualizar a campanha.';
+    $('#cancel-edit-campaign').classList.remove('hidden');
+    $('#publish-button').innerHTML = '<span>✎</span> Salvar alterações';
+    $('#campaign-name').focus();
   } catch (error) { toast(error.message); }
 }
 
@@ -508,17 +641,30 @@ async function publishCampaign() {
   }
   if (state.wppNumbers.length && !numberIds.length) return toast('Selecione ao menos um número para o disparo.');
   const estimate = computeSendEstimate();
-  const button = $('#publish-button'); button.disabled = true; button.innerHTML = '<span>◌</span> Publicando...';
+  const editingId = state.editingCampaignId;
+  const button = $('#publish-button'); button.disabled = true; button.innerHTML = editingId ? '<span>◌</span> Salvando...' : '<span>◌</span> Publicando...';
   try {
-    const response = await fetch('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, dailyStartTime, dailyEndTime, numberIds, messageIntervalValue, messageIntervalUnit }) });
+    const response = await fetch(editingId ? `/api/campaigns/${editingId}` : '/api/campaigns', {
+      method: editingId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, dailyStartTime, dailyEndTime, numberIds, messageIntervalValue, messageIntervalUnit })
+    });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Não foi possível criar a campanha.');
-    const forecast = estimate.status === 'ok' ? ` Previsão: ${estimate.daysNeeded} dia${estimate.daysNeeded === 1 ? '' : 's'} para alcançar todo o público.` : '';
-    toast((state.health.demoMode ? 'Campanha simulada com sucesso.' : 'Campanha agendada com sucesso.') + forecast);
+    if (!response.ok) throw new Error(result.error || (editingId ? 'Não foi possível salvar a campanha.' : 'Não foi possível criar a campanha.'));
+    if (editingId) {
+      cancelEditCampaign();
+      toast('Campanha atualizada.');
+    } else {
+      const forecast = estimate.status === 'ok' ? ` Previsão: ${estimate.daysNeeded} dia${estimate.daysNeeded === 1 ? '' : 's'} para alcançar todo o público.` : '';
+      toast((state.health.demoMode ? 'Campanha simulada com sucesso.' : 'Campanha agendada com sucesso.') + forecast);
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
     await loadData();
   } catch (error) { toast(error.message); }
-  finally { button.disabled = false; button.innerHTML = '<span>↗</span> Publicar campanha'; }
+  finally {
+    button.disabled = false;
+    button.innerHTML = state.editingCampaignId ? '<span>✎</span> Salvar alterações' : '<span>↗</span> Publicar campanha';
+  }
 }
 
 function showPage(view) {
@@ -554,7 +700,8 @@ async function importContacts() {
     const split = (result.numbers || []).length > 1
       ? ` Dividido entre ${result.numbers.length} números: ${result.numbers.map((number) => `${escapeHtml(number.label)} (${number.contactCount})`).join(', ')}.`
       : '';
-    toast(`${result.count} contato${result.count === 1 ? '' : 's'} importado${result.count === 1 ? '' : 's'}.${split}`);
+    const skippedNote = result.skipped ? ` ${result.skipped} já estavam na base e foram ignorados.` : '';
+    toast(`${result.count} contato${result.count === 1 ? '' : 's'} novo${result.count === 1 ? '' : 's'} importado${result.count === 1 ? '' : 's'}.${skippedNote}${split}`);
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.textContent = 'Importar contatos'; }
 }
@@ -755,8 +902,19 @@ $('#close-contacts').addEventListener('click', () => $('#contacts-modal').classL
 $('#campaign-number-table-body').addEventListener('click', (event) => {
   const row = event.target.closest('tr[data-campaign-id]');
   if (!row) return;
+  const actionButton = event.target.closest('[data-action]');
+  if (actionButton) {
+    event.stopPropagation();
+    const action = actionButton.dataset.action;
+    if (action === 'pause') pauseCampaign(row.dataset.campaignId);
+    if (action === 'resume') resumeCampaign(row.dataset.campaignId);
+    if (action === 'edit') editCampaign(row.dataset.campaignId);
+    if (action === 'delete') deleteCampaign(row.dataset.campaignId);
+    return;
+  }
   openCampaignDetail(row.dataset.campaignId, row.dataset.numberId);
 });
+$('#cancel-edit-campaign').addEventListener('click', cancelEditCampaign);
 $('#close-campaign-detail').addEventListener('click', () => $('#campaign-detail-modal').classList.add('hidden'));
 $('#add-contact').addEventListener('click', async () => {
   const name = $('#contact-name').value.trim();
