@@ -1,0 +1,98 @@
+name: CI e deploy de produção
+
+on:
+  pull_request:
+    branches:
+      - feature/unlimited-users-anytime-sends
+  push:
+    branches:
+      - feature/unlimited-users-anytime-sends
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verificar aplicação
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar sintaxe
+        run: for file in server/*.js public/*.js; do node --check "$file"; done
+
+      - name: Executar testes
+        run: npm test
+
+      - name: Auditar vulnerabilidades altas
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Validar imagem Docker
+        run: docker build --tag info-connect-ci:${{ github.sha }} .
+
+  deploy:
+    name: Publicar na VPS
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://sinaipro.com.br
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Empacotar a revisão aprovada
+        run: |
+          git archive --format=tar.gz --output=release.tgz "$GITHUB_SHA"
+          sha256sum release.tgz | tee release.sha256
+
+      - name: Preparar conexão SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Enviar pacote para a VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          scp -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key release.tgz \
+            "$VPS_USER@$VPS_HOST:/var/lib/major-neto-deploy/incoming/$GITHUB_SHA.tgz"
+
+      - name: Implantar com backup e rollback
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          CHECKSUM="$(cut -d ' ' -f 1 release.sha256)"
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
+            "sudo -n /usr/local/sbin/deploy-major-neto '$GITHUB_SHA' '$CHECKSUM'"
+
+      - name: Confirmar acesso público
+        run: curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 https://sinaipro.com.br/api/health

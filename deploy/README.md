@@ -31,3 +31,11 @@ Quando trocar o domínio, altere `PANEL_DOMAIN` em `deploy/runtime/web.env` e ex
 ## Backup
 
 Faça backup dos volumes `app_data`, `wpp_tokens` e `wpp_user_data`. Para o SQLite, prefira `sqlite3 /data/major-neto.sqlite '.backup ...'` dentro do contêiner ou pare o contêiner `app` antes de copiar o volume.
+
+## Deploy automático pelo GitHub
+
+O workflow `.github/workflows/deploy-production.yml` valida sintaxe, testes, dependências e a imagem Docker. Em pushes para `feature/unlimited-users-anytime-sends`, ele envia um arquivo criado por `git archive` para a VPS e chama `/usr/local/sbin/deploy-major-neto`.
+
+Configure no repositório GitHub os secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_PRIVATE_KEY` e `VPS_KNOWN_HOSTS`. A chave deve pertencer a um usuário exclusivo de deploy, sem acesso ao Docker e com `sudo` liberado somente para o script de implantação. O host key deve ser cadastrado em `VPS_KNOWN_HOSTS`; o workflow usa `StrictHostKeyChecking=yes` e não aprende chaves automaticamente.
+
+Antes de trocar o container, o script compila a nova imagem, faz um backup online do SQLite e guarda uma cópia do código atual. Se o health check interno falhar, a imagem e o código anteriores são restaurados automaticamente. Os sete backups de banco mais recentes criados pela esteira ficam em `/var/lib/major-neto-deploy/database-backups`.
