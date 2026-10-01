@@ -1,6 +1,13 @@
 const state = {
   type: 'text',
   recipients: [],
+  contacts: [],
+  contactGroups: [],
+  importGroupMode: 'existing',
+  importExistingGroupId: '',
+  selectedContactsGroupId: 'all',
+  selectedCampaignGroupId: '',
+  campaignSenderNumberId: '',
   media: null,
   campaigns: [],
   campaignNumberRows: [],
@@ -16,7 +23,13 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
-const toast = (message) => { const element = $('#toast'); element.textContent = message; element.classList.add('show'); setTimeout(() => element.classList.remove('show'), 3200); };
+const toast = (message) => {
+  const element = $('#toast');
+  if (!element) { console.error('Elemento de aviso não encontrado:', message); return; }
+  element.textContent = message;
+  element.classList.add('show');
+  setTimeout(() => element.classList.remove('show'), 5000);
+};
 let wppStatusTimer = null;
 let dashboardPollTimer = null;
 let authMode = 'login';
@@ -130,51 +143,79 @@ function renderNumberChecklist() {
     renderSendEstimate();
     return;
   }
-  const previouslyChecked = new Set([...container.querySelectorAll('input:checked')].map((input) => input.value));
+  const numberIds = new Set(state.wppNumbers.map((number) => number.id));
+  state.recipients.forEach((recipient, index) => {
+    if (!numberIds.has(recipient.wppNumberId)) recipient.wppNumberId = state.wppNumbers[index % state.wppNumbers.length].id;
+  });
+  const counts = new Map(state.wppNumbers.map((number) => [number.id, 0]));
+  state.recipients.forEach((recipient) => counts.set(recipient.wppNumberId, (counts.get(recipient.wppNumberId) || 0) + 1));
   container.innerHTML = state.wppNumbers.map((number) => `
-    <label class="number-check-row">
-      <input type="checkbox" value="${number.id}" ${previouslyChecked.size === 0 || previouslyChecked.has(number.id) ? 'checked' : ''} />
-      <span><strong>${escapeHtml(number.label)}</strong><small>sessão: ${escapeHtml(number.sessionKey || number.session)}</small></span>
-    </label>
+    <div class="number-check-row">
+      <span><strong>${escapeHtml(number.label)}</strong><small>${escapeHtml(number.sessionKey || number.session)}</small></span>
+      <span class="assigned-contact-count">${counts.get(number.id)} contato${counts.get(number.id) === 1 ? '' : 's'}</span>
+    </div>
   `).join('');
   renderSendEstimate();
 }
 
-function parseTimeInputMinutes(value) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
+function renderContactGroupSelectors() {
+  const options = state.contactGroups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)} (${group.contactCount})</option>`).join('');
+  const contactsFilter = $('#contacts-group-filter');
+  if (contactsFilter) {
+    contactsFilter.innerHTML = `<option value="all">Todos os grupos (${state.contacts.length})</option>${options}`;
+    contactsFilter.value = state.selectedContactsGroupId;
+    if (contactsFilter.value !== state.selectedContactsGroupId) state.selectedContactsGroupId = 'all';
+  }
+  const campaignGroup = $('#campaign-group-select');
+  if (campaignGroup) {
+    campaignGroup.innerHTML = `<option value="">Selecione um grupo</option><option value="all">Todos os contatos (${state.contacts.length})</option>${options}`;
+    campaignGroup.value = state.selectedCampaignGroupId;
+    if (campaignGroup.value !== state.selectedCampaignGroupId) state.selectedCampaignGroupId = '';
+  }
+  const campaignSender = $('#campaign-sender-number');
+  if (campaignSender) {
+    campaignSender.innerHTML = `<option value="">Escolha o número de envio</option>${state.wppNumbers.map((number) => `<option value="${escapeHtml(number.id)}">${escapeHtml(number.label)}</option>`).join('')}`;
+    campaignSender.value = state.campaignSenderNumberId;
+    if (campaignSender.value !== state.campaignSenderNumberId) state.campaignSenderNumberId = '';
+  }
+  const importMode = $('#contacts-import-mode');
+  const existingGroup = $('#contacts-existing-group');
+  const existingField = $('#contacts-existing-group-field');
+  const newField = $('#contacts-new-group-field');
+  if (importMode && existingGroup && existingField && newField) {
+    existingGroup.innerHTML = state.contactGroups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)} (${group.contactCount})</option>`).join('');
+    if (!state.contactGroups.length) state.importGroupMode = 'new';
+    if (state.importGroupMode === 'existing' && !state.importExistingGroupId && state.contactGroups.length) {
+      state.importExistingGroupId = state.contactGroups[0].id;
+    }
+    importMode.value = state.importGroupMode;
+    existingGroup.value = state.importExistingGroupId;
+    if (existingGroup.value !== state.importExistingGroupId && state.contactGroups.length) {
+      state.importExistingGroupId = state.contactGroups[0].id;
+      existingGroup.value = state.importExistingGroupId;
+    }
+    existingField.classList.toggle('hidden', state.importGroupMode !== 'existing');
+    newField.classList.toggle('hidden', state.importGroupMode !== 'new');
+    importMode.disabled = !state.contactGroups.length;
+  }
 }
 
-// Anti-ban safety valve, mirrored from the server: every lane takes a 15-minute break after
-// each burst of 40 messages, on top of pausing outside the daily window.
+function setCampaignGroup(groupId) {
+  state.selectedCampaignGroupId = groupId;
+  state.recipients = state.contacts
+    .filter((contact) => !groupId || groupId === 'all' || (contact.groupIds || []).includes(groupId))
+    .map((contact) => ({ ...contact, ...(state.campaignSenderNumberId ? { wppNumberId: state.campaignSenderNumberId } : {}) }));
+  renderAudience();
+}
+
+function setCampaignSender(numberId) {
+  state.campaignSenderNumberId = numberId;
+  if (numberId) state.recipients.forEach((recipient) => { recipient.wppNumberId = numberId; });
+  renderAudience();
+}
 const BURST_LIMIT = 40;
 const BURST_PAUSE_MS = 15 * 60 * 1000;
 
-// Simulates one lane's sends inside a single day's window (start at t=0) to count how many
-// messages fit, including the periodic bursts pauses — mirrors the server's advanceLane logic.
-function simulateLaneCapacityPerDay(delayMs, windowMs) {
-  let t = 0;
-  let count = 0;
-  let sinceBreak = 0;
-  while (t < windowMs) {
-    count += 1;
-    sinceBreak += 1;
-    if (sinceBreak >= BURST_LIMIT) {
-      sinceBreak = 0;
-      t += BURST_PAUSE_MS;
-    } else {
-      t += delayMs;
-    }
-  }
-  return count;
-}
-
-// Mirrors the server's daily send window: a lane sends every `delayMs` (pausing 15min every
-// 40 messages) until the window closes, then resumes at the next day's start.
 function computeSendEstimate() {
   const totalContacts = state.recipients.length;
   if (!totalContacts) return { status: 'empty' };
@@ -185,20 +226,29 @@ function computeSendEstimate() {
   const intervalUnit = $('#message-interval-unit').value;
   if (!Number.isFinite(intervalValue) || intervalValue < 1) return { status: 'invalid-interval' };
 
-  const dailyStartMinutes = parseTimeInputMinutes($('#daily-start').value);
-  const dailyEndMinutes = parseTimeInputMinutes($('#daily-end').value);
-  if (dailyStartMinutes === null || dailyEndMinutes === null || dailyEndMinutes <= dailyStartMinutes) return { status: 'invalid-window' };
-
-  const checkedNumbers = $$('#campaign-number-checklist input:checked').length;
-  const laneCount = checkedNumbers || Math.max(state.wppNumbers.length, 1);
-
+  const counts = new Map(state.wppNumbers.map((number) => [number.id, 0]));
+  state.recipients.forEach((recipient) => {
+    if (recipient.wppNumberId && counts.has(recipient.wppNumberId)) counts.set(recipient.wppNumberId, counts.get(recipient.wppNumberId) + 1);
+  });
+  const contactsPerLane = Math.max(0, ...counts.values());
+  const laneCount = [...counts.values()].filter((count) => count > 0).length || 1;
   const delayMs = intervalValue * (intervalUnit === 'minutes' ? 60000 : 1000);
-  const windowMs = (dailyEndMinutes - dailyStartMinutes) * 60000;
-  const capacityPerDay = simulateLaneCapacityPerDay(delayMs, windowMs);
-  const contactsPerLane = Math.ceil(totalContacts / laneCount);
-  const daysNeeded = Math.max(1, Math.ceil(contactsPerLane / capacityPerDay));
+  const breaks = Math.floor(Math.max(0, contactsPerLane - 1) / BURST_LIMIT);
+  const estimatedMs = Math.max(0, contactsPerLane - 1) * delayMs + breaks * BURST_PAUSE_MS;
+  return { status: 'ok', totalContacts, laneCount, contactsPerLane, estimatedMs };
+}
 
-  return { status: 'ok', totalContacts, laneCount, contactsPerLane, capacityPerDay, daysNeeded, windowHours: (dailyEndMinutes - dailyStartMinutes) / 60 };
+function formatDuration(milliseconds) {
+  const totalMinutes = Math.ceil(milliseconds / 60000);
+  if (totalMinutes < 1) return 'menos de 1 minuto';
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  return [
+    days ? `${days} dia${days === 1 ? '' : 's'}` : '',
+    hours ? `${hours} hora${hours === 1 ? '' : 's'}` : '',
+    minutes ? `${minutes} minuto${minutes === 1 ? '' : 's'}` : ''
+  ].filter(Boolean).join(' e ');
 }
 
 function renderSendEstimate() {
@@ -211,27 +261,20 @@ function renderSendEstimate() {
     return;
   }
   if (estimate.status === 'missing-interval') {
-    box.innerHTML = '<p>Informe o intervalo entre mensagens para calcular quantos dias o disparo vai levar.</p>';
+    box.innerHTML = '<p>Informe o intervalo entre mensagens para calcular a previsão.</p>';
     return;
   }
   if (estimate.status === 'invalid-interval') {
     box.innerHTML = '<p>Informe um intervalo válido entre mensagens.</p>';
     return;
   }
-  if (estimate.status === 'invalid-window') {
-    box.classList.add('warning');
-    box.innerHTML = '<strong>Horário diário inválido</strong><p>O horário de término precisa ser depois do horário de início.</p>';
-    return;
-  }
-  const { totalContacts, laneCount, contactsPerLane, capacityPerDay, daysNeeded, windowHours } = estimate;
-  const windowLabel = Number.isInteger(windowHours) ? windowHours : windowHours.toFixed(1);
+  const { totalContacts, laneCount, contactsPerLane, estimatedMs } = estimate;
   const laneNote = laneCount > 1
-    ? `Dividido entre ${laneCount} números: cada um envia ${contactsPerLane} contato${contactsPerLane === 1 ? '' : 's'} ao mesmo tempo.`
-    : 'Cadastre e selecione mais números para dividir o envio e reduzir o tempo total.';
-  box.classList.toggle('warning', daysNeeded > 1);
-  box.innerHTML = `<strong>${daysNeeded === 1 ? 'O envio cabe em 1 dia' : `O envio vai levar ${daysNeeded} dias`}</strong><p>${totalContacts} contato${totalContacts === 1 ? '' : 's'} · até ${capacityPerDay} mensagens por número em cada janela de ${windowLabel}h.</p><p>${laneNote}</p><p>A cada ${BURST_LIMIT} mensagens, cada número pausa 15 minutos automaticamente antes de continuar.</p>`;
+    ? `Dividido entre ${laneCount} números: cada um envia cerca de ${contactsPerLane} contato${contactsPerLane === 1 ? '' : 's'}.`
+    : 'Conecte mais números para dividir o envio entre eles.';
+  box.classList.toggle('warning', estimatedMs > 24 * 60 * 60 * 1000);
+  box.innerHTML = `<strong>Previsão: ${formatDuration(estimatedMs)}</strong><p>${totalContacts} contato${totalContacts === 1 ? '' : 's'} · disparos podem iniciar a qualquer horário.</p><p>${laneNote}</p><p>A cada ${BURST_LIMIT} mensagens, cada número pausa 15 minutos automaticamente.</p>`;
 }
-
 async function checkWppStatuses() {
   if (state.health.demoMode || !state.wppNumbers.length) return;
   await Promise.all(state.wppNumbers.map(async (number) => {
@@ -256,6 +299,7 @@ async function loadWppNumbers() {
     state.wppNumbers = response.ok ? await response.json() : [];
   } catch { state.wppNumbers = []; }
   renderWppNumbers();
+  renderAudience();
   startWhatsAppStatusPolling();
 }
 
@@ -411,6 +455,10 @@ async function deleteCampaign(id) {
 
 function cancelEditCampaign() {
   state.editingCampaignId = null;
+  state.selectedCampaignGroupId = '';
+  state.campaignSenderNumberId = '';
+  state.recipients = [];
+  renderAudience();
   $('#composer-title').textContent = 'Nova campanha';
   $('#composer-subtitle').textContent = 'Configure o disparo e publique quando estiver pronto.';
   $('#cancel-edit-campaign').classList.add('hidden');
@@ -472,8 +520,6 @@ async function editCampaign(id) {
     if (publicUrlInput) publicUrlInput.value = state.media?.publicUrl || '';
     updatePreview();
     $('#campaign-start').value = toDatetimeLocalValue(campaign.scheduledAt);
-    $('#daily-start').value = minutesToTimeValue(campaign.dailyStartMinutes);
-    $('#daily-end').value = minutesToTimeValue(campaign.dailyEndMinutes);
     const delayMs = campaign.delayMs || 3000;
     if (delayMs % 60000 === 0 && delayMs / 60000 <= 60) {
       $('#message-interval-unit').value = 'minutes';
@@ -482,7 +528,13 @@ async function editCampaign(id) {
       $('#message-interval-unit').value = 'seconds';
       $('#message-interval').value = String(Math.round(delayMs / 1000));
     }
-    $$('#campaign-number-checklist input').forEach((input) => { input.checked = (campaign.numberIds || []).includes(input.value); });
+    state.recipients = (campaign.recipients || []).map((recipient) => ({ ...recipient }));
+    state.selectedCampaignGroupId = campaign.groupId
+      ? (state.contactGroups.some((group) => group.id === campaign.groupId) ? campaign.groupId : '')
+      : 'all';
+    const campaignSenders = [...new Set(state.recipients.map((recipient) => recipient.wppNumberId).filter(Boolean))];
+    state.campaignSenderNumberId = campaignSenders.length === 1 ? campaignSenders[0] : '';
+    renderAudience();
     renderSendEstimate();
     state.editingCampaignId = campaign.id;
     $('#composer-title').textContent = 'Editar campanha';
@@ -495,34 +547,64 @@ async function editCampaign(id) {
 
 function renderAudience() {
   const count = state.recipients.length;
+  renderContactGroupSelectors();
+  renderNumberChecklist();
   $('#audience-count').textContent = count ? `${count} contato${count === 1 ? '' : 's'} selecionado${count === 1 ? '' : 's'}` : 'Nenhum contato selecionado';
-  $('#audience-subtitle').textContent = count ? 'Contatos salvos' : 'Adicione contatos para começar';
-  $('#contacts-metric').textContent = count;
+  $('#audience-subtitle').textContent = count ? 'Público desta campanha' : 'Adicione contatos para começar';
+  $('#contacts-metric').textContent = state.contacts.length;
   $('#audience-footnote').textContent = count ? `${count} contato${count === 1 ? '' : 's'} pronto${count === 1 ? '' : 's'} para receber` : 'Nenhum contato cadastrado';
   $('#audience-list').innerHTML = state.recipients.slice(0, 4).map((recipient, index) => `<span class="contact-avatar a${(index % 3) + 1}">${escapeHtml((recipient.name || '?').slice(0, 2).toUpperCase())}</span>`).join('');
   $('#audience-progress-bar').style.width = `${Math.min(count * 25, 100)}%`;
   $('#publish-button').disabled = !count;
-  $('#contact-list').innerHTML = state.recipients.map((recipient) => `<div class="contact-row"><span class="list-icon">♧</span><span><strong>${escapeHtml(recipient.name)}</strong><small>${escapeHtml(recipient.phone)}</small></span></div>`).join('');
+  const numberOptions = state.wppNumbers.map((number) => `<option value="${escapeHtml(number.id)}">${escapeHtml(number.label)}</option>`).join('');
+  const selectedByPhone = new Map(state.recipients.map((recipient, index) => [recipient.phone, { recipient, index }]));
+  const modalContacts = state.contacts.filter((contact) => !state.selectedCampaignGroupId || state.selectedCampaignGroupId === 'all' || (contact.groupIds || []).includes(state.selectedCampaignGroupId));
+  const modalPhones = new Set(modalContacts.map((contact) => contact.phone));
+  state.recipients.forEach((recipient) => {
+    if (!modalPhones.has(recipient.phone)) {
+      modalContacts.push(recipient);
+      modalPhones.add(recipient.phone);
+    }
+  });
+  $('#contact-list').innerHTML = modalContacts.map((contact) => {
+    const selected = selectedByPhone.get(contact.phone);
+    const recipient = selected?.recipient || contact;
+    const index = selected?.index ?? -1;
+    return `
+    <div class="contact-row">
+      <label class="contact-audience-toggle"><input type="checkbox" data-recipient-selected="${escapeHtml(contact.phone)}" ${selected ? 'checked' : ''} /><span>Incluir</span></label>
+      <span class="list-icon">♧</span>
+      <span class="contact-row-details"><strong>${escapeHtml(recipient.name)}</strong><small>${escapeHtml(recipient.phone)}</small></span>
+      <label class="contact-sender-field"><span>Enviar por</span><select class="text-input contact-sender-select" data-recipient-sender="${index}" aria-label="Celular para ${escapeHtml(recipient.name)}" ${selected ? '' : 'disabled'}>
+        <option value="">Selecione um celular</option>${numberOptions}
+      </select></label>
+    </div>`;
+  }).join('');
+  $$('#contact-list [data-recipient-sender]').forEach((select) => {
+    select.value = state.recipients[Number(select.dataset.recipientSender)]?.wppNumberId || '';
+  });
   renderContactsPage();
   renderSendEstimate();
 }
-
 function renderContactsPage() {
   const body = $('#contacts-table-body');
   if (!body) return;
-  const count = state.recipients.length;
+  const count = state.contacts.length;
   const navCount = $('#contacts-nav-count');
   if (navCount) navCount.textContent = count;
-  if (!count) {
-    body.innerHTML = '<tr><td colspan="3"><div class="empty-state"><strong>Nenhum contato cadastrado</strong><span>Importe uma planilha ou adicione contatos abaixo.</span></div></td></tr>';
+  const visibleContacts = state.contacts.filter((contact) => state.selectedContactsGroupId === 'all' || (contact.groupIds || []).includes(state.selectedContactsGroupId));
+  if (!visibleContacts.length) {
+    body.innerHTML = '<tr><td colspan="4"><div class="empty-state"><strong>Nenhum contato neste grupo</strong><span>Escolha outro grupo ou importe uma planilha para cá.</span></div></td></tr>';
     return;
   }
-  body.innerHTML = [...state.recipients]
+  body.innerHTML = visibleContacts
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-    .map((contact) => `<tr><td>${escapeHtml(contact.name)}</td><td>${escapeHtml(contact.phone)}</td><td>${escapeHtml(contact.region || 'Brasil')}</td></tr>`)
+    .map((contact) => {
+      const groupNames = state.contactGroups.filter((group) => (contact.groupIds || []).includes(group.id)).map((group) => group.name).join(', ');
+      return `<tr><td>${escapeHtml(contact.name)}</td><td>${escapeHtml(contact.phone)}</td><td>${escapeHtml(contact.region || 'Brasil')}</td><td>${escapeHtml(groupNames || '—')}</td></tr>`;
+    })
     .join('');
 }
-
 function setType(type) {
   state.type = type;
   $$('.content-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.type === type));
@@ -606,11 +688,17 @@ async function handleFile(file) {
 
 async function loadData() {
   try {
-    const [healthResponse, campaignsResponse, contactsResponse] = await Promise.all([fetch('/api/health'), fetch('/api/campaigns'), fetch('/api/contacts')]);
-    if (!campaignsResponse.ok || !contactsResponse.ok) throw new Error('Sessão expirada.');
+    const [healthResponse, campaignsResponse, contactsResponse, groupsResponse] = await Promise.all([fetch('/api/health'), fetch('/api/campaigns'), fetch('/api/contacts'), fetch('/api/contact-groups')]);
+    if (!campaignsResponse.ok || !contactsResponse.ok || !groupsResponse.ok) throw new Error('Sessão expirada.');
     state.health = await healthResponse.json();
     state.campaigns = await campaignsResponse.json();
-    state.recipients = await contactsResponse.json();
+    state.contacts = await contactsResponse.json();
+    state.contactGroups = await groupsResponse.json();
+    state.importGroupMode = state.contactGroups.length ? 'existing' : 'new';
+    state.importExistingGroupId = state.contactGroups[0]?.id || '';
+    state.selectedCampaignGroupId = '';
+    state.campaignSenderNumberId = '';
+    state.recipients = [];
     renderAudience();
     await loadWppNumbers();
     await loadCampaignNumberStats();
@@ -656,22 +744,21 @@ async function publishCampaign() {
   const publicUrlInput = $('#public-url');
   if (publicUrlInput && state.media) state.media.publicUrl = publicUrlInput.value.trim();
   const startAtInput = $('#campaign-start').value;
-  const dailyStartTime = $('#daily-start').value;
-  const dailyEndTime = $('#daily-end').value;
   const messageIntervalValue = $('#message-interval').value.trim();
   const messageIntervalUnit = $('#message-interval-unit').value;
-  const numberIds = $$('#campaign-number-checklist input:checked').map((input) => input.value);
+  const numberIds = [...new Set(state.recipients.map((recipient) => recipient.wppNumberId).filter(Boolean))];
   if (!state.recipients.length) return toast('Adicione ao menos um contato ao público.');
+  if (!state.selectedCampaignGroupId) return toast('Selecione o grupo de pessoas que receberá a campanha.');
   if (!name || (!messages.length && !state.media)) return toast('Preencha o nome e ao menos uma mensagem (ou mídia).');
+  if (state.type !== 'text' && !state.media?.base64) return toast(`Envie o arquivo de ${state.type === 'image' ? 'imagem' : 'vídeo'} da campanha.`);
   if (!startAtInput) return toast('Informe a data e hora de início da campanha.');
-  if (!dailyStartTime || !dailyEndTime) return toast('Informe o horário diário de início e término dos disparos.');
-  if (dailyEndTime <= dailyStartTime) return toast('O horário diário de término precisa ser depois do início.');
   if (!messageIntervalValue) return toast('Informe o intervalo entre mensagens.');
   const intervalValue = Number(messageIntervalValue);
   if (!Number.isSafeInteger(intervalValue) || intervalValue < 1 || intervalValue > (messageIntervalUnit === 'minutes' ? 60 : 3600)) {
     return toast('Escolha de 1 a 3600 segundos ou de 1 a 60 minutos.');
   }
-  if (state.wppNumbers.length && !numberIds.length) return toast('Selecione ao menos um número para o disparo.');
+  if (!state.wppNumbers.length || state.recipients.some((recipient) => !recipient.wppNumberId)) return toast('Escolha um celular para cada contato do público.');
+  if (!state.campaignSenderNumberId) return toast('Escolha o grupo e o número remetente da campanha.');
   const startDate = new Date(startAtInput);
   if (Number.isNaN(startDate.getTime())) return toast('Informe uma data e hora de início válida.');
   const startAt = startDate.toISOString();
@@ -679,7 +766,7 @@ async function publishCampaign() {
   const editingId = state.editingCampaignId;
   const button = $('#publish-button'); button.disabled = true; button.innerHTML = editingId ? '<span>◌</span> Salvando...' : '<span>◌</span> Publicando...';
   try {
-    const payload = { name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, dailyStartTime, dailyEndTime, numberIds, messageIntervalValue, messageIntervalUnit };
+    const payload = { name, type: state.type, messages, recipients: state.recipients, media: state.media, startAt, numberIds, groupId: state.selectedCampaignGroupId !== 'all' ? state.selectedCampaignGroupId : null, messageIntervalValue, messageIntervalUnit };
     let result;
     if (editingId) {
       const response = await fetch(`/api/campaigns/${editingId}`, {
@@ -696,7 +783,7 @@ async function publishCampaign() {
       cancelEditCampaign();
       toast('Campanha atualizada.');
     } else {
-      const forecast = estimate.status === 'ok' ? ` Previsão: ${estimate.daysNeeded} dia${estimate.daysNeeded === 1 ? '' : 's'} para alcançar todo o público.` : '';
+      const forecast = estimate.status === 'ok' ? ` Previsão: ${formatDuration(estimate.estimatedMs)} para concluir o público.` : '';
       toast((state.health.demoMode ? 'Campanha simulada com sucesso.' : 'Campanha agendada com sucesso.') + forecast);
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -719,6 +806,9 @@ function showPage(view) {
 function handleContactsFile(file) {
   if (!file) return;
   if (file.size > 10 * 1024 * 1024) return toast('A planilha precisa ter no máximo 10 MB.');
+  const groupInput = $('#contacts-new-group-name');
+  const previousFileGroupName = state.contactsFile?.name.replace(/\.[^.]+$/, '').slice(0, 80) || '';
+  if (state.importGroupMode === 'new' && (!groupInput.value.trim() || groupInput.value === previousFileGroupName)) groupInput.value = file.name.replace(/\.[^.]+$/, '').slice(0, 80);
   state.contactsFile = file;
   $('#contacts-file-name').textContent = file.name;
   $('#imported-file').classList.remove('hidden');
@@ -728,21 +818,44 @@ function handleContactsFile(file) {
 
 async function importContacts() {
   if (!state.contactsFile) return;
+  const groupName = $('#contacts-new-group-name').value.trim();
+  const groupId = $('#contacts-existing-group').value;
+  if (state.importGroupMode === 'existing' && !groupId) return toast('Escolha o grupo que receberá estes contatos.');
+  if (state.importGroupMode === 'new' && !groupName) return toast('Informe um nome para o novo grupo.');
+  const previousRecipients = new Map(state.recipients.map((recipient) => [recipient.phone, recipient]));
   const formData = new FormData();
   formData.append('file', state.contactsFile);
+  if (state.importGroupMode === 'existing') formData.append('groupId', groupId);
+  else formData.append('groupName', groupName);
   const button = $('#import-contacts'); button.disabled = true; button.textContent = 'Importando...';
   try {
     const response = await fetch('/api/contacts/import', { method: 'POST', body: formData });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível importar os contatos.');
-    state.recipients = result.contacts || [];
+    state.contacts = result.contacts || [];
+    state.contactGroups = result.groups || state.contactGroups;
+    if (state.importGroupMode === 'new' && result.group?.id) {
+      state.importGroupMode = 'new';
+      state.importExistingGroupId = result.group.id;
+      $('#contacts-new-group-name').value = '';
+    } else if (result.group?.id) {
+      state.importExistingGroupId = result.group.id;
+    }
+    state.selectedContactsGroupId = result.group?.id || 'all';
+    state.recipients = state.selectedCampaignGroupId
+      ? state.contacts
+        .filter((contact) => state.selectedCampaignGroupId === 'all' || previousRecipients.has(contact.phone))
+        .filter((contact) => state.selectedCampaignGroupId === 'all' || (contact.groupIds || []).includes(state.selectedCampaignGroupId))
+        .map((contact) => ({ ...contact, wppNumberId: previousRecipients.get(contact.phone)?.wppNumberId || state.campaignSenderNumberId || contact.wppNumberId }))
+      : [];
     renderAudience();
     if (result.numbers) { state.wppNumbers = result.numbers; renderWppNumbers(); }
+    renderAudience();
     const split = (result.numbers || []).length > 1
       ? ` Dividido entre ${result.numbers.length} números: ${result.numbers.map((number) => `${escapeHtml(number.label)} (${number.contactCount})`).join(', ')}.`
       : '';
     const skippedNote = result.skipped ? ` ${result.skipped} já estavam na base e foram ignorados.` : '';
-    toast(`${result.count} contato${result.count === 1 ? '' : 's'} novo${result.count === 1 ? '' : 's'} importado${result.count === 1 ? '' : 's'}.${skippedNote}${split}`);
+    toast(`${result.count} contato${result.count === 1 ? '' : 's'} adicionado${result.count === 1 ? '' : 's'} ao grupo ${result.group?.name || groupName}.${skippedNote}${split}`);
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.textContent = 'Importar contatos'; }
 }
@@ -838,6 +951,7 @@ async function addWppNumber() {
     if (!response.ok) throw new Error(result.error || 'Não foi possível adicionar o número.');
     state.wppNumbers = result.numbers;
     renderWppNumbers();
+    renderAudience();
     $('#wpp-number-label').value = '';
     $('#wpp-number-session').value = '';
     toast('Número adicionado.');
@@ -862,6 +976,7 @@ async function generateNewWppQr() {
     if (!response.ok) throw new Error(result.error || 'Não foi possível adicionar o número.');
     state.wppNumbers = result.numbers;
     renderWppNumbers();
+    renderAudience();
     $('#wpp-number-label').value = '';
     $('#wpp-number-session').value = '';
     const number = state.wppNumbers.find((item) => (item.sessionKey || item.session) === session);
@@ -879,7 +994,13 @@ async function removeWppNumber(id) {
     delete state.wppNumberStatus[id];
     renderWppNumbers();
     const contactsResponse = await fetch('/api/contacts');
-    if (contactsResponse.ok) { state.recipients = await contactsResponse.json(); renderAudience(); }
+    if (contactsResponse.ok) {
+      state.contacts = await contactsResponse.json();
+      state.recipients = state.selectedCampaignGroupId
+        ? state.contacts.filter((contact) => state.selectedCampaignGroupId === 'all' || (contact.groupIds || []).includes(state.selectedCampaignGroupId)).map((contact) => ({ ...contact }))
+        : [];
+      renderAudience();
+    }
     toast('Número removido. Os contatos dele voltam a ficar sem número atribuído.');
   } catch (error) { toast(error.message); }
 }
@@ -893,7 +1014,12 @@ async function extractContacts() {
     const response = await fetch(`/api/integrations/wppconnect/contacts?session=${encodeURIComponent(number.session)}`);
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível extrair os contatos.');
-    state.recipients = result.contacts || [];
+    state.contacts = result.contacts || [];
+    state.contactGroups = result.groups || state.contactGroups;
+    state.selectedContactsGroupId = result.group?.id || state.selectedContactsGroupId;
+    state.recipients = state.selectedCampaignGroupId
+      ? state.contacts.filter((contact) => state.selectedCampaignGroupId === 'all' || (contact.groupIds || []).includes(state.selectedCampaignGroupId)).map((contact) => ({ ...contact }))
+      : [];
     renderAudience();
     toast(result.demoMode ? 'Nenhum contato extraído no modo demonstração.' : `${result.count} contato${result.count === 1 ? '' : 's'} extraído${result.count === 1 ? '' : 's'} de ${number.label}.`);
   } catch (error) { toast(error.message); }
@@ -919,7 +1045,7 @@ $('#send-test-button').addEventListener('click', async () => {
   const publicUrlInput = $('#public-url');
   if (publicUrlInput && state.media) state.media.publicUrl = publicUrlInput.value.trim();
   if (!message && !state.media) return toast('Escreva uma mensagem ou anexe uma mídia para testar.');
-  const checkedNumberIds = $$('#campaign-number-checklist input:checked').map((input) => input.value);
+  const checkedNumberIds = [...new Set(state.recipients.map((recipient) => recipient.wppNumberId).filter(Boolean))];
   const numberId = checkedNumberIds[0] || state.wppNumbers[0]?.id;
   if (!numberId) return toast('Cadastre um número do WhatsApp antes de testar.');
   const button = $('#send-test-button'); button.disabled = true; button.textContent = 'Enviando...';
@@ -963,10 +1089,13 @@ $('#add-contact').addEventListener('click', async () => {
   if (!name || phone.length < 8) return toast('Informe nome e WhatsApp com DDI.');
   if (state.recipients.some((recipient) => recipient.phone === phone)) return toast('Este contato já foi adicionado.');
   try {
-    const response = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, phone }) });
+    const response = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, phone, groupId: state.selectedCampaignGroupId && state.selectedCampaignGroupId !== 'all' ? state.selectedCampaignGroupId : null }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível salvar o contato.');
-    state.recipients = result.contacts;
+    state.contacts = result.contacts;
+    state.contactGroups = result.groups || state.contactGroups;
+    renderContactsPage();
+    state.recipients.push({ ...result.contact, wppNumberId: state.campaignSenderNumberId || result.contact?.wppNumberId || state.wppNumbers[0]?.id || null });
     $('#contact-name').value = '';
     $('#contact-phone').value = '';
     renderAudience();
@@ -979,6 +1108,30 @@ $('#contacts-upload').addEventListener('click', () => $('#contacts-file').click(
 $('#contacts-file').addEventListener('change', (event) => handleContactsFile(event.target.files[0]));
 $('#remove-contacts-file').addEventListener('click', () => { state.contactsFile = null; $('#contacts-file').value = ''; $('#contacts-upload').classList.remove('hidden'); $('#imported-file').classList.add('hidden'); $('#import-contacts').disabled = true; });
 $('#import-contacts').addEventListener('click', importContacts);
+$('#create-group').addEventListener('click', async () => {
+  const input = $('#new-group-name');
+  const name = input.value.trim();
+  if (!name) return toast('Informe um nome para o grupo.');
+  const button = $('#create-group'); button.disabled = true;
+  try {
+    const response = await fetch('/api/contact-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível criar o grupo.');
+    state.contactGroups = result.groups || state.contactGroups;
+    state.importGroupMode = 'existing';
+    state.importExistingGroupId = result.group.id;
+    state.selectedContactsGroupId = result.group.id;
+    input.value = '';
+    renderAudience();
+    renderContactsPage();
+    toast(`Grupo "${result.group.name}" criado.`);
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+});
+$('#contacts-import-mode').addEventListener('change', (event) => {
+  state.importGroupMode = event.target.value;
+  renderContactGroupSelectors();
+});
 $('#extract-contacts').addEventListener('click', extractContacts);
 $('#add-wpp-number').addEventListener('click', addWppNumber);
 $('#generate-wpp-qr').addEventListener('click', generateNewWppQr);
@@ -991,9 +1144,32 @@ $('#wpp-number-list').addEventListener('click', (event) => {
 });
 $('#message-interval').addEventListener('input', renderSendEstimate);
 $('#message-interval-unit').addEventListener('change', renderSendEstimate);
-$('#daily-start').addEventListener('change', renderSendEstimate);
-$('#daily-end').addEventListener('change', renderSendEstimate);
 $('#campaign-start').addEventListener('change', renderSendEstimate);
-$('#campaign-number-checklist').addEventListener('change', renderSendEstimate);
+$('#campaign-group-select').addEventListener('change', (event) => setCampaignGroup(event.target.value));
+$('#campaign-sender-number').addEventListener('change', (event) => setCampaignSender(event.target.value));
+$('#contacts-group-filter').addEventListener('change', (event) => {
+  state.selectedContactsGroupId = event.target.value;
+  renderContactsPage();
+});
+$('#contact-list').addEventListener('change', (event) => {
+  const inclusion = event.target.closest('[data-recipient-selected]');
+  if (inclusion) {
+    const phone = inclusion.dataset.recipientSelected;
+    const existing = state.recipients.find((recipient) => recipient.phone === phone);
+    if (inclusion.checked && !existing) {
+      const contact = state.contacts.find((item) => item.phone === phone);
+      if (contact) state.recipients.push({ ...contact });
+    } else if (!inclusion.checked) {
+      state.recipients = state.recipients.filter((recipient) => recipient.phone !== phone);
+    }
+    renderAudience();
+    return;
+  }
+  const select = event.target.closest('[data-recipient-sender]');
+  if (!select) return;
+  const recipient = state.recipients[Number(select.dataset.recipientSender)];
+  if (recipient) recipient.wppNumberId = select.value || null;
+  renderNumberChecklist();
+});
 if ($('#message').value.includes('\\n')) $('#message').value = $('#message').value.replace(/\\n/g, '\n');
 renderAudience(); updatePreview(); initializeAuth();

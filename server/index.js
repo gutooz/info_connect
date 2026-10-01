@@ -109,12 +109,16 @@ function normalizeRecipients(recipients) {
   if (!Array.isArray(recipients)) return [];
   return recipients
     .map((recipient) => {
-      if (typeof recipient === 'string') return { phone: onlyDigits(recipient), name: 'Contato', region: 'Brasil' };
-      return { phone: onlyDigits(recipient.phone), name: String(recipient.name || 'Contato').slice(0, 80), region: String(recipient.region || 'Brasil').trim().slice(0, 80) || 'Brasil' };
+      if (typeof recipient === 'string') return { phone: onlyDigits(recipient), name: 'Contato', region: 'Brasil', wppNumberId: null };
+      return {
+        phone: onlyDigits(recipient.phone),
+        name: String(recipient.name || 'Contato').slice(0, 80),
+        region: String(recipient.region || 'Brasil').trim().slice(0, 80) || 'Brasil',
+        wppNumberId: String(recipient.wppNumberId || '').trim() || null
+      };
     })
     .filter((recipient) => recipient.phone.length >= 8 && recipient.phone.length <= 15);
 }
-
 function normalizeContact(name, phone, { nameFallback = 'Contato', region } = {}) {
   const normalizedPhone = onlyDigits(phone);
   if (!normalizedPhone || normalizedPhone.length < 8 || normalizedPhone.length > 15) return null;
@@ -187,37 +191,31 @@ function normalizeWppContact(contact) {
 }
 
 const MAX_MESSAGE_VARIANTS = 5;
-const MAX_CAMPAIGN_RECIPIENTS = 10000;
 // Anti-ban safety valve: a number that never stops sending looks automated, so every lane
 // takes a longer break after a burst of messages, independent of the daily send window.
 const BURST_LIMIT = 40;
 const BURST_PAUSE_MS = 15 * 60 * 1000;
 
-function parseTimeOfDay(value) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-
-function atMinutesOfDay(date, minutes) {
-  const result = new Date(date);
-  result.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-  return result;
-}
-
-// Returns the next moment at or after `from` that falls inside the daily [start, end) window,
-// rolling over to the next day's window start when `from` lands after today's window closes.
-function nextWindowMoment(from, dailyStartMinutes, dailyEndMinutes) {
-  const todayStart = atMinutesOfDay(from, dailyStartMinutes);
-  const todayEnd = atMinutesOfDay(from, dailyEndMinutes);
-  if (from.getTime() < todayStart.getTime()) return todayStart;
-  if (from.getTime() < todayEnd.getTime()) return from;
-  const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-  return tomorrowStart;
+// Older campaigns stored the next daily-window opening in nextSendAt. Move only those
+// legacy timestamps forward while preserving the configured interval and burst pause.
+for (const campaign of campaigns) {
+  if (!campaign.dailyStartMinutes && !campaign.dailyEndMinutes) continue;
+  let changed = false;
+  const resumesSending = campaign.status === 'sending' || (campaign.status === 'paused' && campaign.pausedFrom === 'sending');
+  if (resumesSending && Array.isArray(campaign.lanes)) {
+    for (const lane of campaign.lanes) {
+      if (lane.done) continue;
+      const gapMs = lane.sentSinceBreak === 0 ? BURST_PAUSE_MS : (campaign.delayMs || 3000);
+      const nextAllowed = Date.now() + gapMs;
+      if (!Number.isFinite(Number(lane.nextSendAt)) || Number(lane.nextSendAt) > nextAllowed) {
+        lane.nextSendAt = nextAllowed;
+        changed = true;
+      }
+    }
+  }
+  delete campaign.dailyStartMinutes;
+  delete campaign.dailyEndMinutes;
+  if (changed) campaignStore.save(campaign);
 }
 
 function validateCampaign(input, ownerId) {
@@ -227,27 +225,45 @@ function validateCampaign(input, ownerId) {
   const type = ['text', 'image', 'video'].includes(whatsapp.type) ? whatsapp.type : 'text';
   const rawMessages = Array.isArray(whatsapp.messages) && whatsapp.messages.length ? whatsapp.messages : (whatsapp.message ? [whatsapp.message] : []);
   const messages = rawMessages.map((item) => String(item || '').trim().slice(0, 4096)).filter(Boolean).slice(0, MAX_MESSAGE_VARIANTS);
-  const recipients = normalizeRecipients(input.recipients);
+  let recipients = normalizeRecipients(input.recipients);
   const availableNumbers = campaignStore.listWppNumbers(ownerId);
   const requestedNumberIds = Array.isArray(input.numberIds) ? [...new Set(input.numberIds)] : [];
   const numberIds = requestedNumberIds.filter((id) => availableNumbers.some((number) => number.id === id));
+  const groupId = String(input.groupId || '').trim() || null;
+  const selectedGroup = groupId ? campaignStore.findContactGroup(ownerId, groupId) : null;
 
   if (!name) throw new Error('Informe um nome para a campanha.');
   if (!messages.length && !whatsapp.media?.base64) throw new Error('Adicione ao menos uma mensagem ou um arquivo de mídia.');
   if (!recipients.length) throw new Error('Selecione ao menos um contato válido.');
-  if (recipients.length > MAX_CAMPAIGN_RECIPIENTS) throw new Error(`O limite é de ${MAX_CAMPAIGN_RECIPIENTS} contatos por campanha.`);
   if (type !== 'text' && !whatsapp.media?.base64) throw new Error('Envie o arquivo da campanha.');
   if (numberIds.length !== requestedNumberIds.length) throw new Error('Um dos números selecionados não pertence ao seu acesso.');
   if (!numberIds.length) throw new Error('Cadastre e selecione ao menos um número para o disparo.');
+
+  if (groupId && !selectedGroup) throw new Error('O grupo selecionado não pertence ao seu acesso.');
+  if (selectedGroup) {
+    const groupPhones = new Set(campaignStore.listContactsInGroup(ownerId, groupId).map((contact) => contact.phone));
+    if (recipients.some((recipient) => !groupPhones.has(recipient.phone))) throw new Error('Todos os contatos da campanha precisam pertencer ao grupo selecionado.');
+  }
+
+  const recipientsByNumber = new Map(numberIds.map((numberId) => [numberId, []]));
+  recipients.forEach((recipient, index) => {
+    const numberId = recipient.wppNumberId || numberIds[index % numberIds.length];
+    const group = recipientsByNumber.get(numberId);
+    if (!group) throw new Error('Cada contato precisa estar associado a um número selecionado da sua conta.');
+    group.push({ ...recipient, wppNumberId: numberId });
+  });
+  recipients = [];
+  const maxGroupLength = Math.max(0, ...[...recipientsByNumber.values()].map((group) => group.length));
+  for (let recipientIndex = 0; recipientIndex < maxGroupLength; recipientIndex += 1) {
+    numberIds.forEach((numberId) => {
+      const recipient = recipientsByNumber.get(numberId)[recipientIndex];
+      if (recipient) recipients.push(recipient);
+    });
+  }
   if (aiPersonalization && !aiConfigured) throw new Error('Configure AI_API_KEY no .env para ativar a personalização por IA.');
 
   const startAt = new Date(input.startAt);
   if (Number.isNaN(startAt.getTime())) throw new Error('Informe a data e hora de início da campanha.');
-
-  const dailyStartMinutes = parseTimeOfDay(input.dailyStartTime);
-  const dailyEndMinutes = parseTimeOfDay(input.dailyEndTime);
-  if (dailyStartMinutes === null || dailyEndMinutes === null) throw new Error('Informe o horário diário de início e término dos disparos.');
-  if (dailyEndMinutes - dailyStartMinutes < 1) throw new Error('O horário diário de término deve ser depois do horário de início.');
 
   const intervalValue = Number(input.messageIntervalValue);
   const intervalUnit = input.messageIntervalUnit || 'seconds';
@@ -258,7 +274,7 @@ function validateCampaign(input, ownerId) {
 
   return {
     name, type, message: messages[0] || '', messages, recipients, delayMs, aiPersonalization, numberIds,
-    dailyStartMinutes, dailyEndMinutes,
+    groupId, groupName: selectedGroup?.name || null,
     scheduledAt: startAt.toISOString(),
     channels: { whatsapp: { type, message: messages[0] || '', messages, media: whatsapp.media || null }, instagram: null }
   };
@@ -366,7 +382,7 @@ function simulateDemoDeliveryAndReply({ messageId, ownerId, wppNumberId, phone }
 }
 
 // Each number in numberIds runs its own lane: lane L owns recipients at indexes L, L+laneCount, L+2*laneCount, ...
-// so lanes send in parallel and each one pauses/resumes with the campaign's daily window independently.
+// so each selected sender owns a lane with its own interval and burst pause.
 async function sendLaneMessage(campaign, lane) {
   const content = campaign.channels?.whatsapp || campaign;
   const messages = content.messages && content.messages.length ? content.messages : [content.message || ''];
@@ -433,8 +449,7 @@ async function advanceLane(campaign, lane) {
   const takeBreak = lane.sentSinceBreak >= BURST_LIMIT;
   if (takeBreak) lane.sentSinceBreak = 0;
   const gapMs = takeBreak ? BURST_PAUSE_MS : (campaign.delayMs || 3000);
-  const proposed = new Date(Date.now() + gapMs);
-  lane.nextSendAt = nextWindowMoment(proposed, campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
+  lane.nextSendAt = Date.now() + gapMs;
 }
 
 async function publishToMeta(campaign) {
@@ -481,7 +496,7 @@ function startCampaign(campaign) {
   campaign.sent = campaign.sent || 0;
   const scheduledAt = Date.parse(campaign.scheduledAt);
   const initialReference = new Date(Math.max(Number.isFinite(scheduledAt) ? scheduledAt : 0, Date.now()));
-  const initial = nextWindowMoment(initialReference, campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
+  const initial = initialReference.getTime();
   campaign.lanes = campaign.numberIds.map((numberId, laneIndex) => ({
     numberId, nextIndex: laneIndex, nextSendAt: initial, done: laneIndex >= campaign.recipients.length, sentSinceBreak: 0
   }));
@@ -504,21 +519,8 @@ async function tick() {
 
     const active = campaigns.filter((campaign) => campaign.status === 'sending' && campaign.lanes);
     await Promise.all(active.map(async (campaign) => {
-      let scheduleChanged = false;
-      campaign.lanes.filter((lane) => !lane.done).forEach((lane) => {
-        const storedSendAt = Number(lane.nextSendAt);
-        const reference = new Date(Math.max(Number.isFinite(storedSendAt) ? storedSendAt : 0, now));
-        const normalizedSendAt = nextWindowMoment(reference, campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
-        if (lane.nextSendAt !== normalizedSendAt) {
-          lane.nextSendAt = normalizedSendAt;
-          scheduleChanged = true;
-        }
-      });
       const dueLanes = campaign.lanes.filter((lane) => !lane.done && lane.nextSendAt <= now);
-      if (!dueLanes.length) {
-        if (scheduleChanged) campaignStore.save(campaign);
-        return;
-      }
+      if (!dueLanes.length) return;
       await Promise.all(dueLanes.map((lane) => advanceLane(campaign, lane)));
       if (campaign.status === 'sending' && campaign.lanes.every((lane) => lane.done)) {
         try {
@@ -551,6 +553,17 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/contacts', (req, res) => res.json(campaignStore.listContacts(req.user.id)));
 
+app.get('/api/contact-groups', (req, res) => res.json(campaignStore.listContactGroups(req.user.id)));
+
+app.post('/api/contact-groups', (req, res) => {
+  try {
+    const group = campaignStore.createContactGroup(req.user.id, req.body?.name);
+    res.status(201).json({ group, groups: campaignStore.listContactGroups(req.user.id) });
+  } catch (error) {
+    res.status(422).json({ error: error.message });
+  }
+});
+
 app.get('/api/wpp-numbers', (req, res) => res.json(campaignStore.listWppNumbers(req.user.id)));
 
 app.post('/api/wpp-numbers', (req, res) => {
@@ -572,22 +585,40 @@ app.delete('/api/wpp-numbers/:id', (req, res) => {
 app.post('/api/contacts', (req, res) => {
   const contact = normalizeContact(req.body?.name, req.body?.phone, { region: req.body?.region });
   if (!contact || !String(req.body?.name || '').trim()) return res.status(422).json({ error: 'Informe nome e WhatsApp válido.' });
-  const contacts = campaignStore.saveContacts(req.user.id, [contact]);
+  const groupId = String(req.body?.groupId || '').trim();
+  const group = groupId ? campaignStore.findContactGroup(req.user.id, groupId) : campaignStore.createContactGroup(req.user.id, 'Contatos manuais');
+  if (!group) return res.status(422).json({ error: 'O grupo selecionado não pertence ao seu acesso.' });
+  campaignStore.saveContacts(req.user.id, [contact]);
   campaignStore.assignContactToLeastLoadedNumber(req.user.id, contact.phone);
-  res.status(201).json({ contact: contacts.find((item) => item.phone === contact.phone), contacts: campaignStore.listContacts(req.user.id) });
+  campaignStore.addContactsToGroup(req.user.id, group.id, [contact.phone]);
+  res.status(201).json({ contact: campaignStore.listContacts(req.user.id).find((item) => item.phone === contact.phone), contacts: campaignStore.listContacts(req.user.id), groups: campaignStore.listContactGroups(req.user.id) });
 });
 
 app.post('/api/contacts/import', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(422).json({ error: 'Selecione uma planilha.' });
+    const requestedGroupId = String(req.body?.groupId || '').trim();
+    const groupName = String(req.body?.groupName || '').trim().slice(0, 80);
+    let group = requestedGroupId ? campaignStore.findContactGroup(req.user.id, requestedGroupId) : null;
+    if (requestedGroupId && !group) return res.status(422).json({ error: 'O grupo escolhido não pertence ao seu acesso.' });
+    if (!requestedGroupId && !groupName) return res.status(422).json({ error: 'Escolha um grupo existente ou informe o nome do novo grupo.' });
     const imported = await parseSpreadsheet(req.file);
     const unique = imported.filter((contact, index, list) => list.findIndex((item) => item.phone === contact.phone) === index);
-    const existingPhones = new Set(campaignStore.listContacts(req.user.id).map((contact) => contact.phone));
-    const fresh = unique.filter((contact) => !existingPhones.has(contact.phone));
-    const skipped = unique.length - fresh.length;
+    if (!unique.length) return res.status(422).json({ error: 'A planilha não tem contatos válidos para importar.' });
+    if (!group) {
+      const duplicateName = campaignStore.listContactGroups(req.user.id).some((item) => item.name.localeCompare(groupName, 'pt-BR', { sensitivity: 'accent' }) === 0);
+      if (duplicateName) return res.status(409).json({ error: 'Já existe um grupo com esse nome. Escolha o grupo existente na lista.' });
+      group = campaignStore.createContactGroup(req.user.id, groupName);
+    }
+    const accountPhones = new Set(campaignStore.listContacts(req.user.id).map((contact) => contact.phone));
+    const groupPhones = new Set(campaignStore.listContactsInGroup(req.user.id, group.id).map((contact) => contact.phone));
+    const fresh = unique.filter((contact) => !accountPhones.has(contact.phone));
+    const addedToGroup = unique.filter((contact) => !groupPhones.has(contact.phone));
+    const skipped = unique.length - addedToGroup.length;
     campaignStore.saveContacts(req.user.id, fresh);
+    campaignStore.addContactsToGroup(req.user.id, group.id, unique.map((contact) => contact.phone));
     const numbers = campaignStore.assignContactsRoundRobin(req.user.id, fresh.map((contact) => contact.phone));
-    res.json({ count: fresh.length, skipped, contacts: campaignStore.listContacts(req.user.id), numbers });
+    res.json({ count: addedToGroup.length, newContacts: fresh.length, skipped, group, groups: campaignStore.listContactGroups(req.user.id), contacts: campaignStore.listContacts(req.user.id), numbers });
   } catch (error) {
     res.status(422).json({ error: `Não foi possível ler a planilha: ${error.message}` });
   }
@@ -660,8 +691,11 @@ app.get('/api/integrations/wppconnect/contacts', async (req, res) => {
     const extracted = unwrapWppResponse(result).map(normalizeWppContact).filter(Boolean);
     const unique = extracted.filter((contact, index, list) => list.findIndex((item) => item.phone === contact.phone) === index);
     campaignStore.saveContacts(req.user.id, unique);
+    const number = campaignStore.listWppNumbers(req.user.id).find((item) => item.session === session);
+    const group = campaignStore.createContactGroup(req.user.id, `WhatsApp - ${number?.label || 'Contatos'}`);
+    campaignStore.addContactsToGroup(req.user.id, group.id, unique.map((contact) => contact.phone));
     campaignStore.assignContactsRoundRobin(req.user.id, unique.map((contact) => contact.phone));
-    res.json({ count: unique.length, contacts: campaignStore.listContacts(req.user.id) });
+    res.json({ count: unique.length, group, groups: campaignStore.listContactGroups(req.user.id), contacts: campaignStore.listContacts(req.user.id) });
   } catch (error) { res.status(502).json({ error: `NÃ£o foi possÃ­vel extrair os contatos: ${error.message}` }); }
 });
 
@@ -848,7 +882,8 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
     const skipped = skipPreviouslyRejectedRecipients(campaign, failures);
     campaign.failed = (campaign.failed || 0) + skipped;
     campaign.lanes.filter((lane) => !lane.done).forEach((lane) => {
-      lane.nextSendAt = nextWindowMoment(new Date(), campaign.dailyStartMinutes, campaign.dailyEndMinutes).getTime();
+      const gapMs = lane.sentSinceBreak === 0 ? BURST_PAUSE_MS : (campaign.delayMs || 3000);
+      lane.nextSendAt = Math.min(Number(lane.nextSendAt) || Infinity, Date.now() + gapMs);
     });
     campaign.status = 'sending';
     campaign.statusLabel = 'Enviando';

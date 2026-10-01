@@ -111,7 +111,14 @@ td{padding:5px 12px}
 .number-check-row input{accent-color:#1d917e}
 .number-check-row strong{display:block;font-size:11px}
 .number-check-row small{display:block;font-size:10px;color:#9aa5aa;margin-top:1px}
-/* Janela de envio diária: horário e previsão de dias */
+.number-check-row{justify-content:space-between;cursor:default}
+.assigned-contact-count{font-size:10px;color:#59716f;white-space:nowrap}
+.contact-row-details{min-width:0;flex:1}
+.contact-sender-field{width:155px;flex:none}
+.contact-sender-field>span{display:block;font-size:9px;color:#7f8d93;margin-bottom:3px}
+.contact-sender-select{margin:0!important;padding:7px 24px 7px 8px;font-size:10px}
+@media(max-width:480px){.contact-sender-field{width:125px}.contact-row{gap:6px}}
+/* Agendamento e previsão de duração do envio */
 .daily-window-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 @media(max-width:480px){.daily-window-row{grid-template-columns:1fr}}
 .send-estimate{margin-top:14px;background:#edf8f5;border:1px solid #d8eee9;border-radius:11px;padding:13px 15px;font-size:11px;color:#3c6863}
@@ -145,3 +152,5 @@ td{padding:5px 12px}
 .row-actions .icon-button{width:26px;height:26px;font-size:14px}
 .row-actions .icon-button.danger{color:#b7838a}
 .row-actions .icon-button.danger:hover{background:#fbeceb;color:#a2454f}
+.contact-audience-toggle{display:flex;align-items:center;gap:4px;font-size:9px;color:#697b80;white-space:nowrap}.contact-audience-toggle input{accent-color:#1d917e}.contact-sender-select:disabled{opacity:.48;cursor:not-allowed}
+.campaign-group-select{margin-bottom:13px}.group-filter-label{display:block;margin-top:18px}#contacts-group-filter{max-width:420px;margin-bottom:12px}.contact-row{flex-wrap:wrap}.contact-sender-field{width:155px}

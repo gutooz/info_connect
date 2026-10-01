@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const Database = require('better-sqlite3');
 
 function createCampaignStore(databasePath) {
@@ -73,6 +74,39 @@ function createCampaignStore(databasePath) {
   if (tableExists('contacts') && !columns('contacts').includes('region')) {
     db.exec("ALTER TABLE contacts ADD COLUMN region TEXT NOT NULL DEFAULT 'Brasil'");
   }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS contacts_id_owner ON contacts(id, owner_user_id);
+    CREATE TABLE IF NOT EXISTS contact_groups (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL COLLATE NOCASE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(owner_user_id, name), UNIQUE(id, owner_user_id)
+    );
+    CREATE TABLE IF NOT EXISTS contact_group_members (
+      owner_user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      contact_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY(owner_user_id, group_id, contact_id),
+      FOREIGN KEY(group_id, owner_user_id) REFERENCES contact_groups(id, owner_user_id) ON DELETE CASCADE,
+      FOREIGN KEY(contact_id, owner_user_id) REFERENCES contacts(id, owner_user_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS contact_groups_owner ON contact_groups(owner_user_id, name);
+    CREATE INDEX IF NOT EXISTS contact_group_members_contact ON contact_group_members(owner_user_id, contact_id);
+  `);
+  const contactOwners = db.prepare(`SELECT DISTINCT owner_user_id FROM contacts
+    WHERE NOT EXISTS (SELECT 1 FROM contact_group_members WHERE contact_group_members.owner_user_id = contacts.owner_user_id AND contact_group_members.contact_id = contacts.id)`).all();
+  const seedLegacyGroup = db.transaction((owners) => owners.forEach(({ owner_user_id: ownerId }) => {
+    const id = crypto.randomUUID();
+    db.prepare("INSERT INTO contact_groups (id, owner_user_id, name) VALUES (?, ?, 'Contatos existentes') ON CONFLICT(owner_user_id, name) DO NOTHING").run(id, ownerId);
+    const group = db.prepare("SELECT id FROM contact_groups WHERE owner_user_id = ? AND name = 'Contatos existentes'").get(ownerId);
+    db.prepare(`INSERT OR IGNORE INTO contact_group_members (owner_user_id, group_id, contact_id)
+      SELECT owner_user_id, ?, id FROM contacts WHERE owner_user_id = ? AND NOT EXISTS (
+        SELECT 1 FROM contact_group_members WHERE contact_group_members.owner_user_id = contacts.owner_user_id AND contact_group_members.contact_id = contacts.id
+      )`).run(group.id, ownerId);
+  }));
+  seedLegacyGroup(contactOwners);
   db.pragma('foreign_keys = ON');
   if (db.pragma('foreign_key_check').length) throw new Error('Falha de integridade apos migracao.');
   db.exec(`CREATE INDEX IF NOT EXISTS campaigns_owner_created ON campaigns(owner_user_id, created_at DESC);
@@ -114,13 +148,50 @@ function createCampaignStore(databasePath) {
     },
     deleteSession(tokenHash) { db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash); },
     listContacts(ownerId) {
-      return db.prepare('SELECT id, name, phone, region, wpp_number_id AS wppNumberId FROM contacts WHERE owner_user_id = ? ORDER BY name COLLATE NOCASE, phone').all(ownerId);
+      const contacts = db.prepare('SELECT id, name, phone, region, wpp_number_id AS wppNumberId FROM contacts WHERE owner_user_id = ? ORDER BY name COLLATE NOCASE, phone').all(ownerId);
+      const memberships = db.prepare('SELECT contact_id AS contactId, group_id AS groupId FROM contact_group_members WHERE owner_user_id = ?').all(ownerId);
+      const groupIdsByContact = new Map();
+      memberships.forEach(({ contactId, groupId }) => {
+        if (!groupIdsByContact.has(contactId)) groupIdsByContact.set(contactId, []);
+        groupIdsByContact.get(contactId).push(groupId);
+      });
+      return contacts.map((contact) => ({ ...contact, groupIds: groupIdsByContact.get(contact.id) || [] }));
     },
     saveContacts(ownerId, contacts) {
       const insert = db.prepare(`INSERT INTO contacts (id, owner_user_id, name, phone, region) VALUES (@id, @ownerId, @name, @phone, @region)
         ON CONFLICT(owner_user_id, phone) DO UPDATE SET name = excluded.name, region = excluded.region, updated_at = datetime('now')`);
       db.transaction((items) => items.forEach((contact) => insert.run({ ...contact, ownerId, region: contact.region || 'Brasil' })))(contacts);
       return this.listContacts(ownerId);
+    },
+    listContactGroups(ownerId) {
+      return db.prepare(`SELECT contact_groups.id, contact_groups.name, COUNT(contact_group_members.contact_id) AS contactCount
+        FROM contact_groups LEFT JOIN contact_group_members ON contact_group_members.group_id = contact_groups.id
+          AND contact_group_members.owner_user_id = contact_groups.owner_user_id
+        WHERE contact_groups.owner_user_id = ? GROUP BY contact_groups.id ORDER BY contact_groups.name COLLATE NOCASE`).all(ownerId);
+    },
+    findContactGroup(ownerId, id) {
+      return db.prepare('SELECT id, name FROM contact_groups WHERE owner_user_id = ? AND id = ?').get(ownerId, id);
+    },
+    listContactsInGroup(ownerId, groupId) {
+      return db.prepare(`SELECT contacts.id, contacts.phone, contacts.name FROM contacts
+        JOIN contact_group_members ON contact_group_members.contact_id = contacts.id
+          AND contact_group_members.owner_user_id = contacts.owner_user_id
+        WHERE contacts.owner_user_id = ? AND contact_group_members.group_id = ?`).all(ownerId, groupId);
+    },
+    createContactGroup(ownerId, rawName) {
+      const name = String(rawName || '').trim().slice(0, 80);
+      if (!name) throw new Error('Informe um nome para o grupo.');
+      const id = crypto.randomUUID();
+      db.prepare('INSERT INTO contact_groups (id, owner_user_id, name) VALUES (?, ?, ?) ON CONFLICT(owner_user_id, name) DO NOTHING').run(id, ownerId, name);
+      return db.prepare('SELECT id, name FROM contact_groups WHERE owner_user_id = ? AND name = ?').get(ownerId, name);
+    },
+    addContactsToGroup(ownerId, groupId, phones) {
+      if (!this.findContactGroup(ownerId, groupId)) throw new Error('Grupo não encontrado nesta conta.');
+      const contacts = phones.map((phone) => db.prepare('SELECT id FROM contacts WHERE owner_user_id = ? AND phone = ?').get(ownerId, phone));
+      if (contacts.some((contact) => !contact)) throw new Error('Um contato não pertence a esta conta.');
+      const addMember = db.prepare('INSERT OR IGNORE INTO contact_group_members (owner_user_id, group_id, contact_id) VALUES (?, ?, ?)');
+      db.transaction((items) => items.forEach((contact) => addMember.run(ownerId, groupId, contact.id)))(contacts);
+      return this.listContactGroups(ownerId);
     },
     listWppNumbers(ownerId) {
       return db.prepare(`SELECT wpp_numbers.id, wpp_numbers.session, wpp_numbers.session_key AS sessionKey, wpp_numbers.label,

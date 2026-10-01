@@ -22,7 +22,7 @@ docker compose ps
 docker compose logs --tail=50 app wppconnect web
 ```
 
-Abra o endereço HTTPS, cadastre o primeiro usuário e leia o QR Code no painel. Depois do primeiro cadastro, outros usuários só podem ser cadastrados por uma pessoa autenticada. Cada login tem contatos, campanhas e sessões de WhatsApp isolados. Na primeira inicialização após atualizar um banco antigo, os dados anteriores ficam com o primeiro usuário cadastrado; faça backup do SQLite antes da atualização.
+Abra o endereço HTTPS e solicite o cadastro de cada usuário. Não há limite numérico de contas; o administrador aprova cada cadastro pelo Telegram. Cada login tem contatos, campanhas e sessões de WhatsApp isolados, com QR Code exclusivo por sessão. Na primeira inicialização após atualizar um banco antigo, os dados anteriores ficam com o primeiro usuário cadastrado; faça backup do SQLite antes da atualização.
 
 ## Troca de domínio
 
