@@ -45,7 +45,7 @@ trap cleanup EXIT
 
 health_check() {
   cd "$APP_DIR"
-  docker compose exec -T web wget -qO- http://app:3000/api/health >/dev/null
+  docker compose exec -T web wget -qO- http://app:3000/api/health >/dev/null 2>&1
 }
 
 rollback() {
