@@ -194,7 +194,7 @@ test('falha de envio fica registrada no destinatário da campanha', async () => 
   }
 });
 
-test('campanha atrasada aguarda a próxima janela diária em vez de disparar fora do horário', async () => {
+test('campanha atrasada dispara mesmo fora da antiga janela diária', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'major-neto-daily-window-'));
   const server = net.createServer();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -247,7 +247,8 @@ test('campanha atrasada aguarda a próxima janela diária em vez de disparar for
     await new Promise((resolve) => setTimeout(resolve, 750));
 
     const detail = await (await request(`/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } })).json();
-    assert.equal(detail.recipients.length, 0);
+    assert.equal(detail.recipients.length, 1);
+    assert.equal(detail.recipients[0].status, 'sent');
   } finally {
     await new Promise((resolve) => { child.once('exit', resolve); child.kill(); });
     fs.rmSync(directory, { recursive: true, force: true });

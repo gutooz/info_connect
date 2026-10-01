@@ -48,7 +48,13 @@ test('persiste usuários, sessões e contatos sem duplicar telefones', () => {
   const second = createCampaignStore(databasePath);
   assert.equal(second.findUserByEmail('ana@example.com').name, 'Ana');
   assert.equal(second.findSession('token-hash').id, 'u1');
-  assert.deepEqual(second.listContacts('u1'), [{ id: 'c1', name: 'Contato atualizado', phone: '5511999999999', region: 'Brasil', wppNumberId: null }]);
+  const contacts = second.listContacts('u1');
+  assert.equal(contacts.length, 1);
+  assert.deepEqual({ ...contacts[0], groupIds: undefined }, {
+    id: 'c1', name: 'Contato atualizado', phone: '5511999999999', region: 'Brasil', wppNumberId: null, groupIds: undefined
+  });
+  assert.equal(contacts[0].groupIds.length, 1);
+  assert.equal(second.listContactGroups('u1')[0].name, 'Contatos existentes');
   second.deleteSession('token-hash');
   assert.equal(second.findSession('token-hash'), undefined);
   second.close();
