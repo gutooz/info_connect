@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
-const ExcelJS = require('exceljs');
+const readXlsxFile = require('read-excel-file/node');
 require('dotenv').config();
 process.env.TZ = String(process.env.APP_TIMEZONE || 'America/Sao_Paulo');
 const { createCampaignStore } = require('./storage');
@@ -130,46 +130,51 @@ function normalizeContact(name, phone, { nameFallback = 'Contato', region } = {}
   };
 }
 
-const IMPORT_NAME_HEADERS = ['nome', 'name'];
-const IMPORT_PHONE_HEADERS = ['telefone', 'phone', 'whatsapp', 'celular'];
-const IMPORT_REGION_HEADERS = ['regiao', 'região', 'cidade', 'city', 'estado'];
+const IMPORT_NAME_HEADERS = ['nome', 'name', 'cliente'];
+const IMPORT_PHONE_HEADERS = ['telefone', 'phone', 'whatsapp', 'celular', 'numero', 'fone', 'contato'];
+const IMPORT_REGION_HEADERS = ['regiao', 'cidade', 'city', 'estado', 'bairro'];
+
+function normalizeHeader(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+// Aceita o termo exato ou cabeçalhos compostos (ex.: "Nome do cliente", "Número").
+function findHeaderIndex(headers, terms) {
+  const exact = headers.findIndex((header) => terms.includes(header));
+  if (exact >= 0) return exact;
+  return headers.findIndex((header) => header.split(/[^a-z0-9]+/).some((word) => terms.includes(word)));
+}
+
+function contactsFromRows(rows) {
+  if (!rows.length) return [];
+  const headers = rows[0].map(normalizeHeader);
+  const phoneIndex = findHeaderIndex(headers, IMPORT_PHONE_HEADERS);
+  const nameIndex = findHeaderIndex(headers, IMPORT_NAME_HEADERS);
+  const regionIndex = findHeaderIndex(headers, IMPORT_REGION_HEADERS);
+  if (nameIndex < 0 || phoneIndex < 0) throw new Error('A planilha precisa ter as colunas nome e telefone.');
+  return rows.slice(1).map((values) => normalizeContact(values[nameIndex], values[phoneIndex], {
+    nameFallback: 'Delivery',
+    region: regionIndex >= 0 ? values[regionIndex] : ''
+  })).filter(Boolean);
+}
 
 function parseCsv(buffer) {
   const lines = buffer.toString('utf8').split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return [];
-  const headers = lines.shift().split(/[;,]/).map((header) => header.trim().toLowerCase());
-  const nameIndex = headers.findIndex((header) => IMPORT_NAME_HEADERS.includes(header));
-  const phoneIndex = headers.findIndex((header) => IMPORT_PHONE_HEADERS.includes(header));
-  const regionIndex = headers.findIndex((header) => IMPORT_REGION_HEADERS.includes(header));
-  if (nameIndex < 0 || phoneIndex < 0) throw new Error('A planilha precisa ter as colunas nome e telefone.');
-  return lines.map((line) => {
-    const values = line.split(/[;,]/).map((value) => value.trim().replace(/^"|"$/g, ''));
-    return normalizeContact(values[nameIndex], values[phoneIndex], { nameFallback: 'Delivery', region: regionIndex >= 0 ? values[regionIndex] : '' });
-  }).filter(Boolean);
+  const rows = lines.map((line) => line.split(/[;,]/).map((value) => value.trim().replace(/^"|"$/g, '')));
+  return contactsFromRows(rows);
 }
 
 async function parseSpreadsheet(file) {
   const extension = path.extname(file.originalname).toLowerCase();
   if (extension === '.csv') return parseCsv(file.buffer);
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(file.buffer);
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) return [];
-  const headerRow = worksheet.getRow(1).values.map((value) => String(value || '').trim().toLowerCase());
-  const nameIndex = headerRow.findIndex((header) => IMPORT_NAME_HEADERS.includes(header));
-  const phoneIndex = headerRow.findIndex((header) => IMPORT_PHONE_HEADERS.includes(header));
-  const regionIndex = headerRow.findIndex((header) => IMPORT_REGION_HEADERS.includes(header));
-  if (nameIndex < 0 || phoneIndex < 0) throw new Error('A planilha precisa ter as colunas nome e telefone.');
-  const parsed = [];
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return;
-    const contact = normalizeContact(row.getCell(nameIndex).value, row.getCell(phoneIndex).value, {
-      nameFallback: 'Delivery',
-      region: regionIndex >= 0 ? row.getCell(regionIndex).value : ''
-    });
-    if (contact) parsed.push(contact);
-  });
-  return parsed;
+  let sheets;
+  try {
+    sheets = await readXlsxFile(file.buffer);
+  } catch {
+    throw new Error('Não foi possível ler a planilha. Salve como .xlsx ou .csv e tente novamente.');
+  }
+  const rows = (sheets[0]?.data || []).map((row) => row.map((cell) => (cell instanceof Date ? '' : cell)));
+  return contactsFromRows(rows);
 }
 
 function isKnownSession(ownerId, session) {
