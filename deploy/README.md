@@ -38,4 +38,6 @@ O workflow `.github/workflows/deploy-production.yml` valida sintaxe, testes, dep
 
 Configure no repositório GitHub os secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_PRIVATE_KEY` e `VPS_KNOWN_HOSTS`. A chave deve pertencer a um usuário exclusivo de deploy, sem acesso ao Docker e com `sudo` liberado somente para o script de implantação. O host key deve ser cadastrado em `VPS_KNOWN_HOSTS`; o workflow usa `StrictHostKeyChecking=yes` e não aprende chaves automaticamente.
 
+Na preparação inicial da VPS, copie a chave pública e execute como `root`: `bash deploy/install-github-deploy.sh /caminho/chave.pub deploy/deploy-from-github.sh`. O instalador cria o usuário `major-deploy`, os diretórios de staging e a regra restrita de `sudo`.
+
 Antes de trocar o container, o script compila a nova imagem, faz um backup online do SQLite e guarda uma cópia do código atual. Se o health check interno falhar, a imagem e o código anteriores são restaurados automaticamente. Os sete backups de banco mais recentes criados pela esteira ficam em `/var/lib/major-neto-deploy/database-backups`.
