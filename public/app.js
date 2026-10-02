@@ -867,7 +867,7 @@ async function connectWppNumber(id) {
   state.qrPendingNumberId = id;
   renderWppNumbers();
   try {
-    const response = await fetch('/api/integrations/wppconnect/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: number.session }) });
+    const response = await fetch('/api/integrations/wppconnect/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: number.session, restart: true }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível conectar o WhatsApp.');
     if (result.demoMode) {
