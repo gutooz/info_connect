@@ -324,6 +324,11 @@ async function wppGet(endpoint, sessionOverride) {
   return response.json().catch(() => ({}));
 }
 
+function isWppSessionConnected(status) {
+  const normalized = String(status || '').trim().toUpperCase().replace(/[\s_-]+/g, '');
+  return new Set(['CONNECTED', 'OPEN', 'AUTHENTICATED', 'LOGGED', 'ISLOGGED', 'INCHAT', 'QRREADSUCCESS']).has(normalized);
+}
+
 function extractAiText(result) {
   if (typeof result.output_text === 'string') return result.output_text.trim();
   return (result.output || []).flatMap((item) => item.content || []).filter((item) => item.type === 'output_text').map((item) => item.text).join('').trim();
@@ -681,7 +686,7 @@ app.get('/api/integrations/wppconnect/status', async (req, res) => {
   try {
     const result = await wppGet('status-session', session);
     const status = String(result.status || 'UNKNOWN').toUpperCase();
-    const connected = ['CONNECTED', 'OPEN', 'AUTHENTICATED', 'LOGGED', 'IN_CHAT'].some((value) => status.includes(value));
+    const connected = isWppSessionConnected(status);
     res.json({ connected, status, session });
   } catch (error) { res.status(502).json({ error: `Não foi possível consultar o WhatsApp: ${error.message}` }); }
 });

@@ -8,9 +8,10 @@ const { spawn } = require('node:child_process');
 const test = require('node:test');
 const { createCampaignStore } = require('./storage');
 
-test('gera QR Code a partir da imagem devolvida pelo WPPConnect', async () => {
+test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'major-neto-qr-'));
   const image = Buffer.from('89504e470d0a1a0a', 'hex');
+  let sessionStatus = 'inChat';
   const wpp = http.createServer((req, res) => {
     if (/^\/api\/[^/]+\/test-secret\/generate-token$/.test(req.url)) {
       res.setHeader('Content-Type', 'application/json');
@@ -23,6 +24,10 @@ test('gera QR Code a partir da imagem devolvida pelo WPPConnect', async () => {
       assert.equal(req.headers.authorization, 'Bearer test-token');
       res.setHeader('Content-Type', 'image/png');
       res.end(image);
+    } else if (/^\/api\/[^/]+\/status-session$/.test(req.url)) {
+      assert.equal(req.headers.authorization, 'Bearer test-token');
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ status: sessionStatus }));
     } else {
       res.writeHead(404).end();
     }
@@ -81,6 +86,13 @@ test('gera QR Code a partir da imagem devolvida pelo WPPConnect', async () => {
     const qr = await request(`/api/integrations/wppconnect/qr?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
     assert.equal(qr.status, 200);
     assert.equal((await qr.json()).qrCode, `data:image/png;base64,${image.toString('base64')}`);
+    const status = await request(`/api/integrations/wppconnect/status?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
+    assert.equal(status.status, 200);
+    assert.equal((await status.json()).connected, true);
+    sessionStatus = 'notLogged';
+    const disconnected = await request(`/api/integrations/wppconnect/status?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
+    assert.equal(disconnected.status, 200);
+    assert.equal((await disconnected.json()).connected, false);
     assert.equal((await request('/api/integrations/wppconnect/qr?session=other', { headers: { Cookie: cookie } })).status, 422);
   } finally {
     await new Promise((resolve) => { child.once('exit', resolve); child.kill(); });
