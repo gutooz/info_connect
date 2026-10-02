@@ -12,24 +12,14 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'major-neto-qr-'));
   const image = Buffer.from('89504e470d0a1a0a', 'hex');
   let sessionStatus = 'inChat';
-  let sessionWasClosed = false;
   const wpp = http.createServer((req, res) => {
     if (/^\/api\/[^/]+\/test-secret\/generate-token$/.test(req.url)) {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ token: 'test-token' }));
-    } else if (/^\/api\/[^/]+\/close-session$/.test(req.url)) {
-      assert.equal(req.headers.authorization, 'Bearer test-token');
-      sessionWasClosed = true;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ status: true }));
     } else if (/^\/api\/[^/]+\/start-session$/.test(req.url)) {
       assert.equal(req.headers.authorization, 'Bearer test-token');
       res.setHeader('Content-Type', 'application/json');
-      if (!sessionWasClosed) {
-        res.writeHead(409).end(JSON.stringify({ message: 'A sessao anterior ainda esta travada.' }));
-      } else {
-        res.end(JSON.stringify({ status: 'QRCODE', qrcode: null }));
-      }
+      res.end(JSON.stringify({ status: 'QRCODE', qrcode: null }));
     } else if (/^\/api\/[^/]+\/qrcode-session$/.test(req.url)) {
       assert.equal(req.headers.authorization, 'Bearer test-token');
       res.setHeader('Content-Type', 'image/png');
@@ -89,7 +79,7 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
     const session = (await number.json()).numbers[0].session;
     const connect = await request('/api/integrations/wppconnect/connect', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ session, restart: true })
+      body: JSON.stringify({ session })
     });
     assert.equal(connect.status, 200);
     assert.equal((await connect.json()).status, 'QRCODE');

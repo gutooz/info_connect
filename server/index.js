@@ -647,18 +647,6 @@ app.post('/api/integrations/wppconnect/connect', async (req, res) => {
     const webhookUrl = process.env.PUBLIC_BASE_URL
       ? `${String(process.env.PUBLIC_BASE_URL).replace(/\/$/, '')}/api/integrations/wppconnect/webhook${webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : ''}`
       : null;
-    if (req.body.restart === true) {
-      try {
-        await fetch(`${base}/api/${encodeURIComponent(session)}/close-session`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: '{}',
-          signal: AbortSignal.timeout(15000)
-        });
-      } catch (error) {
-        console.warn(`[wppconnect] Nao foi possivel encerrar a sessao ${session} antes de reinicia-la: ${error.message}`);
-      }
-    }
     const response = await fetch(`${base}/api/${encodeURIComponent(session)}/start-session`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ waitQrCode: true, ...(webhookUrl ? { webhook: webhookUrl } : {}) }), signal: AbortSignal.timeout(60000) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) return res.status(response.status).json({ error: result.message || 'Não foi possível iniciar a sessão do WhatsApp.' });
