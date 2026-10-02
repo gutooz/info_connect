@@ -1,0 +1,54 @@
+name: Reiniciar WPPConnect
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  restart:
+    name: Reiniciar WhatsApp na VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://sinaipro.com.br
+    steps:
+      - name: Preparar conexao SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Reiniciar e validar WPPConnect
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          container=major-neto-wppconnect-1
+          sudo -n /usr/bin/docker restart "$container"
+          for _attempt in $(seq 1 30); do
+            if sudo -n /usr/bin/docker exec "$container" node -e \
+              "fetch('http://127.0.0.1:21465/healthz').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          sudo -n /usr/bin/docker logs --tail=50 "$container"
+          exit 1
+          REMOTE
+
+      - name: Confirmar aplicacao publica
+        run: curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 https://sinaipro.com.br/api/health
