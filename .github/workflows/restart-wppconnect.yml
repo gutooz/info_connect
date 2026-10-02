@@ -29,14 +29,17 @@ jobs:
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
 
-      - name: Reiniciar e validar WPPConnect
+      - name: Instalar autorizacao e reiniciar WPPConnect
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
-            'sudo -n /usr/local/sbin/restart-major-neto-wppconnect'
+            -i ~/.ssh/deploy_key "root@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          test "$(id -u)" -eq 0
+          /opt/major-neto/deploy/install-wppconnect-restart.sh
+          /usr/local/sbin/restart-major-neto-wppconnect
+          REMOTE
 
       - name: Confirmar aplicacao publica
         run: curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 https://sinaipro.com.br/api/health
