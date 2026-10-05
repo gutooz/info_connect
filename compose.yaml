@@ -11,7 +11,10 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       DATABASE_PATH: /data/major-neto.sqlite
-      WPP_CONNECT_URL: http://wppconnect:21465
+      # O host gerado pelo Compose é exclusivo deste projeto. O alias genérico
+      # "wppconnect" também existe na rede compartilhada do BippFood e fazia o
+      # DNS alternar entre duas integrações com segredos diferentes.
+      WPP_CONNECT_URL: http://major-neto-wppconnect-1:21465
     volumes:
       - app_data:/data
     depends_on:
