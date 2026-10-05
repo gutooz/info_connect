@@ -11,7 +11,8 @@ const { createCampaignStore } = require('./storage');
 test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'major-neto-qr-'));
   const image = Buffer.from('89504e470d0a1a0a', 'hex');
-  let sessionStatus = 'inChat';
+  let sessionConnected = false;
+  let startCalls = 0;
   let issuedTokens = 0;
   let rejectCurrentToken = false;
   const wpp = http.createServer((req, res) => {
@@ -19,6 +20,7 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ token: `test-token-${++issuedTokens}` }));
     } else if (/^\/api\/[^/]+\/start-session$/.test(req.url)) {
+      startCalls += 1;
       assert.equal(req.headers.authorization, 'Bearer test-token-1');
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ status: 'QRCODE', qrcode: null }));
@@ -26,7 +28,7 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
       assert.equal(req.headers.authorization, 'Bearer test-token-1');
       res.setHeader('Content-Type', 'image/png');
       res.end(image);
-    } else if (/^\/api\/[^/]+\/status-session$/.test(req.url)) {
+    } else if (/^\/api\/[^/]+\/check-connection-session$/.test(req.url)) {
       if (rejectCurrentToken && req.headers.authorization === 'Bearer test-token-1') {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Check that the Session and Token are correct' }));
@@ -34,7 +36,7 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
       }
       assert.equal(req.headers.authorization, rejectCurrentToken ? 'Bearer test-token-2' : 'Bearer test-token-1');
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ status: sessionStatus }));
+      res.end(JSON.stringify({ status: sessionConnected, message: sessionConnected ? 'Connected' : 'Disconnected' }));
     } else {
       res.writeHead(404).end();
     }
@@ -93,11 +95,19 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
     const qr = await request(`/api/integrations/wppconnect/qr?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
     assert.equal(qr.status, 200);
     assert.equal((await qr.json()).qrCode, `data:image/png;base64,${image.toString('base64')}`);
+    sessionConnected = true;
     rejectCurrentToken = true;
     const status = await request(`/api/integrations/wppconnect/status?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
     assert.equal(status.status, 200);
     assert.equal((await status.json()).connected, true);
-    sessionStatus = 'notLogged';
+    const reconnect = await request('/api/integrations/wppconnect/connect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ session })
+    });
+    assert.equal(reconnect.status, 200);
+    assert.equal((await reconnect.json()).status, 'CONNECTED');
+    assert.equal(startCalls, 1);
+    sessionConnected = false;
     const disconnected = await request(`/api/integrations/wppconnect/status?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
     assert.equal(disconnected.status, 200);
     assert.equal((await disconnected.json()).connected, false);

@@ -330,8 +330,15 @@ async function wppGet(endpoint, sessionOverride) {
 }
 
 function isWppSessionConnected(status) {
+  if (status === true) return true;
   const normalized = String(status || '').trim().toUpperCase().replace(/[\s_-]+/g, '');
-  return new Set(['CONNECTED', 'OPEN', 'AUTHENTICATED', 'LOGGED', 'ISLOGGED', 'INCHAT', 'QRREADSUCCESS']).has(normalized);
+  return new Set(['CONNECTED', 'OPEN', 'AUTHENTICATED', 'LOGGED', 'ISLOGGED', 'INCHAT', 'MAIN', 'QRREADSUCCESS']).has(normalized);
+}
+
+function wppConnectionStatus(result) {
+  const connected = isWppSessionConnected(result?.status) || isWppSessionConnected(result?.message);
+  const status = result?.message || result?.status || 'UNKNOWN';
+  return { connected, status: String(status).toUpperCase() };
 }
 
 function extractAiText(result) {
@@ -647,6 +654,8 @@ app.post('/api/integrations/wppconnect/connect', async (req, res) => {
   }
   if (demoMode) return res.json({ status: 'awaiting_qr', demoMode: true, message: 'Modo demonstração: nenhum WhatsApp foi conectado.' });
   try {
+    const current = wppConnectionStatus(await wppGet('check-connection-session', session));
+    if (current.connected) return res.json({ status: 'CONNECTED', qrCode: null });
     const webhookUrl = process.env.PUBLIC_BASE_URL
       ? `${String(process.env.PUBLIC_BASE_URL).replace(/\/$/, '')}/api/integrations/wppconnect/webhook${webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : ''}`
       : null;
@@ -687,10 +696,8 @@ app.get('/api/integrations/wppconnect/status', async (req, res) => {
   }
   if (demoMode) return res.json({ connected: false, status: 'DEMO', demoMode: true });
   try {
-    const result = await wppGet('status-session', session);
-    const status = String(result.status || 'UNKNOWN').toUpperCase();
-    const connected = isWppSessionConnected(status);
-    res.json({ connected, status, session });
+    const status = wppConnectionStatus(await wppGet('check-connection-session', session));
+    res.json({ ...status, session });
   } catch (error) { res.status(502).json({ error: `Não foi possível consultar o WhatsApp: ${error.message}` }); }
 });
 
