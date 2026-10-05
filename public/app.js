@@ -111,26 +111,34 @@ function renderWppNumbers() {
     list.innerHTML = '<div class="empty-state"><strong>Nenhum número cadastrado</strong><span>Clique em Gerar QR Code para conectar um WhatsApp.</span></div>';
   } else {
     list.innerHTML = state.wppNumbers.map((number) => {
-      const connected = Boolean(state.wppNumberStatus[number.id]);
+      const status = state.wppNumberStatus[number.id];
+      const connected = status === true;
+      const checking = status === undefined;
+      const unavailable = status === null;
       const pending = state.qrPendingNumberId === number.id;
+      const statusLabel = connected ? 'Conectado' : checking ? 'Verificando...' : unavailable ? 'Verificação indisponível' : 'Não conectado';
+      const buttonLabel = connected ? 'Conectado' : pending ? 'Gerando...' : checking ? 'Verificando...' : unavailable ? 'Tentar novamente em instantes' : 'Gerar QR Code';
       return `<div class="wpp-number-row" data-id="${number.id}">
         <div class="service-logo whatsapp-logo mini">◌</div>
         <div><strong>${escapeHtml(number.label)}</strong><small>sessão: ${escapeHtml(number.sessionKey || number.session)} · ${number.contactCount || 0} contato${number.contactCount === 1 ? '' : 's'}</small></div>
-        <span class="integration-badge ${connected ? 'connected' : 'pending'}"><i></i> ${connected ? 'Conectado' : 'Não conectado'}</span>
-        <button class="button button-secondary" data-action="connect" type="button" ${connected || pending ? 'disabled' : ''}>${connected ? 'Conectado' : pending ? 'Gerando...' : 'Gerar QR Code'}</button>
+        <span class="integration-badge ${connected ? 'connected' : 'pending'}"><i></i> ${statusLabel}</span>
+        <button class="button button-secondary" data-action="connect" type="button" ${connected || pending || checking || unavailable ? 'disabled' : ''}>${buttonLabel}</button>
         <button class="icon-button" data-action="remove" type="button" aria-label="Remover número">×</button>
       </div>`;
     }).join('');
   }
   const anyConnected = state.wppNumbers.some((number) => state.wppNumberStatus[number.id]);
+  const anyChecking = state.wppNumbers.some((number) => state.wppNumberStatus[number.id] === undefined);
+  const anyUnavailable = state.wppNumbers.some((number) => state.wppNumberStatus[number.id] === null);
+  const pageStatus = anyConnected ? 'Conectado' : anyChecking ? 'Verificando...' : anyUnavailable ? 'Verificação indisponível' : 'Não conectado';
   const pageBadge = $('#whatsapp-page .integration-badge');
   if (pageBadge) {
     pageBadge.classList.toggle('pending', !anyConnected);
     pageBadge.classList.toggle('connected', anyConnected);
-    pageBadge.innerHTML = `<i></i> ${anyConnected ? 'Conectado' : 'Não conectado'}`;
+    pageBadge.innerHTML = `<i></i> ${pageStatus}`;
   }
   const previewStatus = $('#preview-whatsapp-status');
-  if (previewStatus) previewStatus.textContent = anyConnected ? 'conectado' : 'não conectado';
+  if (previewStatus) previewStatus.textContent = anyConnected ? 'conectado' : anyChecking ? 'verificando' : anyUnavailable ? 'verificação indisponível' : 'não conectado';
   renderNumberChecklist();
   renderContactsPage();
 }
@@ -281,8 +289,9 @@ async function checkWppStatuses() {
     try {
       const response = await fetch(`/api/integrations/wppconnect/status?session=${encodeURIComponent(number.session)}`);
       const result = await response.json();
-      state.wppNumberStatus[number.id] = response.ok && result.connected === true;
-    } catch { state.wppNumberStatus[number.id] = false; }
+      if (!response.ok) throw new Error(result.error || 'Não foi possível consultar o WhatsApp.');
+      state.wppNumberStatus[number.id] = result.connected === true;
+    } catch { state.wppNumberStatus[number.id] = null; }
   }));
   renderWppNumbers();
 }
