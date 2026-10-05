@@ -747,6 +747,8 @@ app.get('/api/dashboard/campaign-numbers', (req, res) => {
         campaignName: campaign.name,
         campaignStatus: campaign.status,
         campaignStatusLabel: campaign.statusLabel,
+        campaignSent: campaign.sent || 0,
+        campaignAudience: campaign.audience || 0,
         wppNumberId: row.wppNumberId,
         numberLabel: row.numberLabel || 'Sem número',
         total: row.total,

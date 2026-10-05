@@ -44,7 +44,6 @@ test('webhook do WPPConnect atualiza entrega e resposta, refletidas no dashboard
     const login = await request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'ana@example.com', password: 'correct-password' }) });
     assert.equal(login.status, 200);
     const cookie = login.headers.get('set-cookie').split(';')[0];
-    const ownerId = (await login.json()).user.id;
 
     const numberResponse = await request('/api/wpp-numbers', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ label: 'Principal', session: 'major' }) });
     assert.equal(numberResponse.status, 201);
@@ -70,24 +69,30 @@ test('webhook do WPPConnect atualiza entrega e resposta, refletidas no dashboard
     assert.equal(campaignResponse.status, 201);
     const campaign = await campaignResponse.json();
 
-    // Campanha agendada para o futuro (não dispara sozinha); inserimos um destinatário "enviado"
-    // diretamente no banco para testar o webhook sem depender do agendador real.
-    const sideStore = createCampaignStore(databasePath);
-    sideStore.createRecipient({ id: 'recipient-1', campaignId: campaign.id, ownerId, wppNumberId: number.id, phone: '5511999999999', name: 'Cliente' });
-    sideStore.markRecipientSent('recipient-1', { messageId: 'msg-1', sentAt: new Date().toISOString() });
-    sideStore.close();
+    const launch = await request(`/api/campaigns/${campaign.id}/launch`, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(launch.status, 200);
+    let sentRecipient = null;
+    for (let attempt = 0; attempt < 50 && !sentRecipient; attempt += 1) {
+      const current = await (await request(`/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } })).json();
+      sentRecipient = current.recipients.find((recipient) => recipient.sentAt);
+      if (!sentRecipient) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(sentRecipient);
+    assert.ok(sentRecipient.messageId);
 
     const wrongSecret = await request('/api/integrations/wppconnect/webhook?secret=wrong', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: number.session, event: 'onack', id: 'msg-1', ack: 2 })
+      body: JSON.stringify({ session: number.session, event: 'onack', id: sentRecipient.messageId, ack: 2 })
     });
     assert.equal(wrongSecret.status, 401);
 
     const ackResponse = await request('/api/integrations/wppconnect/webhook?secret=test-secret', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: number.session, event: 'onack', id: 'msg-1', ack: 2 })
+      body: JSON.stringify({ session: number.session, event: 'onack', id: sentRecipient.messageId, ack: 2 })
     });
     assert.equal(ackResponse.status, 200);
+    const afterAck = await (await request(`/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } })).json();
+    assert.ok(afterAck.recipients[0].deliveredAt, JSON.stringify(afterAck.recipients[0]));
 
     const replyResponse = await request('/api/integrations/wppconnect/webhook?secret=test-secret', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -106,6 +111,9 @@ test('webhook do WPPConnect atualiza entrega e resposta, refletidas no dashboard
     const row = dashboard.find((item) => item.campaignId === campaign.id);
     assert.ok(row);
     assert.equal(row.numberLabel, 'Principal');
+    assert.equal(row.campaignSent, 1);
+    assert.equal(row.campaignAudience, 1);
+    assert.equal(row.campaignStatus, 'completed');
     assert.equal(row.sentCount, 1);
     assert.equal(row.deliveredCount, 1);
     assert.equal(row.repliedCount, 1);

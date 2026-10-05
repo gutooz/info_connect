@@ -353,7 +353,20 @@ async function loadCampaignNumberStats() {
   try {
     const response = await fetch('/api/dashboard/campaign-numbers');
     state.campaignNumberRows = response.ok ? await response.json() : [];
+    const progressByCampaign = new Map(state.campaignNumberRows.map((row) => [row.campaignId, row]));
+    state.campaigns = state.campaigns.map((campaign) => {
+      const progress = progressByCampaign.get(campaign.id);
+      if (!progress) return campaign;
+      return {
+        ...campaign,
+        sent: progress.campaignSent,
+        audience: progress.campaignAudience,
+        status: progress.campaignStatus,
+        statusLabel: progress.campaignStatusLabel
+      };
+    });
   } catch { state.campaignNumberRows = []; }
+  renderCampaigns();
   renderCampaignNumberTable();
 }
 
