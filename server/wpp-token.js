@@ -2,10 +2,10 @@ function createWppTokenProvider({ baseUrl, secretKey, defaultSession, defaultTok
   const cache = new Map();
   const base = String(baseUrl || '').replace(/\/$/, '');
 
-  return async function tokenFor(session) {
+  return async function tokenFor(session, { refresh = false } = {}) {
     if (!/^[a-zA-Z0-9_-]{1,60}$/.test(session || '')) throw new Error('Sessão do WhatsApp inválida.');
-    if (session === defaultSession && defaultToken) return defaultToken;
-    if (cache.has(session)) return cache.get(session);
+    if (!refresh && cache.has(session)) return cache.get(session);
+    if (!refresh && session === defaultSession && defaultToken) return defaultToken;
     if (!base || !secretKey) throw new Error('WPPConnect não está configurado para novos números.');
 
     const response = await fetchImpl(`${base}/api/${encodeURIComponent(session)}/${encodeURIComponent(secretKey)}/generate-token`, {

@@ -12,20 +12,27 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'major-neto-qr-'));
   const image = Buffer.from('89504e470d0a1a0a', 'hex');
   let sessionStatus = 'inChat';
+  let issuedTokens = 0;
+  let rejectCurrentToken = false;
   const wpp = http.createServer((req, res) => {
     if (/^\/api\/[^/]+\/test-secret\/generate-token$/.test(req.url)) {
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ token: 'test-token' }));
+      res.end(JSON.stringify({ token: `test-token-${++issuedTokens}` }));
     } else if (/^\/api\/[^/]+\/start-session$/.test(req.url)) {
-      assert.equal(req.headers.authorization, 'Bearer test-token');
+      assert.equal(req.headers.authorization, 'Bearer test-token-1');
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ status: 'QRCODE', qrcode: null }));
     } else if (/^\/api\/[^/]+\/qrcode-session$/.test(req.url)) {
-      assert.equal(req.headers.authorization, 'Bearer test-token');
+      assert.equal(req.headers.authorization, 'Bearer test-token-1');
       res.setHeader('Content-Type', 'image/png');
       res.end(image);
     } else if (/^\/api\/[^/]+\/status-session$/.test(req.url)) {
-      assert.equal(req.headers.authorization, 'Bearer test-token');
+      if (rejectCurrentToken && req.headers.authorization === 'Bearer test-token-1') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Check that the Session and Token are correct' }));
+        return;
+      }
+      assert.equal(req.headers.authorization, rejectCurrentToken ? 'Bearer test-token-2' : 'Bearer test-token-1');
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ status: sessionStatus }));
     } else {
@@ -86,6 +93,7 @@ test('gera QR Code e reconhece os estados de conexão devolvidos pelo WPPConnect
     const qr = await request(`/api/integrations/wppconnect/qr?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
     assert.equal(qr.status, 200);
     assert.equal((await qr.json()).qrCode, `data:image/png;base64,${image.toString('base64')}`);
+    rejectCurrentToken = true;
     const status = await request(`/api/integrations/wppconnect/status?session=${encodeURIComponent(session)}`, { headers: { Cookie: cookie } });
     assert.equal(status.status, 200);
     assert.equal((await status.json()).connected, true);

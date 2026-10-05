@@ -285,21 +285,32 @@ function validateCampaign(input, ownerId) {
   };
 }
 
-async function wppRequest(endpoint, body, sessionOverride) {
+async function wppFetch(endpoint, { method = 'GET', headers = {}, body, timeoutMs } = {}, sessionOverride) {
   const base = String(process.env.WPP_CONNECT_URL || '').replace(/\/$/, '');
   const sessionName = sessionOverride || process.env.WPP_CONNECT_SESSION || '';
   if (!base || !sessionName) {
     throw new Error('WPPConnect não está configurado.');
   }
-  const token = await wppTokenFor(sessionName);
-  const response = await fetch(`${base}/api/${encodeURIComponent(sessionName)}/${endpoint}`, {
+  const request = async (refresh = false) => {
+    const token = await wppTokenFor(sessionName, { refresh });
+    return fetch(`${base}/api/${encodeURIComponent(sessionName)}/${endpoint}`, {
+      method,
+      headers: { ...headers, Authorization: `Bearer ${token}` },
+      ...(body === undefined ? {} : { body }),
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {})
+    });
+  };
+  let response = await request();
+  if (response.status === 401) response = await request(true);
+  return response;
+}
+
+async function wppRequest(endpoint, body, sessionOverride) {
+  const response = await wppFetch(endpoint, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
-  });
+  }, sessionOverride);
   if (!response.ok) {
     const detail = await response.text();
     const error = new Error(`WPPConnect respondeu ${response.status}: ${detail.slice(0, 160)}`);
@@ -310,13 +321,7 @@ async function wppRequest(endpoint, body, sessionOverride) {
 }
 
 async function wppGet(endpoint, sessionOverride) {
-  const base = String(process.env.WPP_CONNECT_URL || '').replace(/\/$/, '');
-  const sessionName = sessionOverride || process.env.WPP_CONNECT_SESSION || '';
-  if (!base || !sessionName) throw new Error('WPPConnect nÃ£o estÃ¡ configurado.');
-  const token = await wppTokenFor(sessionName);
-  const response = await fetch(`${base}/api/${encodeURIComponent(sessionName)}/${endpoint}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const response = await wppFetch(endpoint, {}, sessionOverride);
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`WPPConnect respondeu ${response.status}: ${detail.slice(0, 160)}`);
@@ -642,12 +647,15 @@ app.post('/api/integrations/wppconnect/connect', async (req, res) => {
   }
   if (demoMode) return res.json({ status: 'awaiting_qr', demoMode: true, message: 'Modo demonstração: nenhum WhatsApp foi conectado.' });
   try {
-    const base = String(process.env.WPP_CONNECT_URL || '').replace(/\/$/, '');
-    const token = await wppTokenFor(session);
     const webhookUrl = process.env.PUBLIC_BASE_URL
       ? `${String(process.env.PUBLIC_BASE_URL).replace(/\/$/, '')}/api/integrations/wppconnect/webhook${webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : ''}`
       : null;
-    const response = await fetch(`${base}/api/${encodeURIComponent(session)}/start-session`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ waitQrCode: true, ...(webhookUrl ? { webhook: webhookUrl } : {}) }), signal: AbortSignal.timeout(60000) });
+    const response = await wppFetch('start-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waitQrCode: true, ...(webhookUrl ? { webhook: webhookUrl } : {}) }),
+      timeoutMs: 60000
+    }, session);
     const result = await response.json().catch(() => ({}));
     if (!response.ok) return res.status(response.status).json({ error: result.message || 'Não foi possível iniciar a sessão do WhatsApp.' });
     res.json({ status: result.status || 'awaiting_qr', qrCode: result.qrcode || result.qrCode || result.response?.qrcode || result.response?.qrCode || null });
@@ -660,12 +668,7 @@ app.get('/api/integrations/wppconnect/qr', async (req, res) => {
   if (!isKnownSession(req.user.id, session)) return res.status(422).json({ error: 'Cadastre este número antes de gerar o QR Code.' });
   if (demoMode) return res.json({ qrCode: null, demoMode: true });
   try {
-    const base = String(process.env.WPP_CONNECT_URL || '').replace(/\/$/, '');
-    const token = await wppTokenFor(session);
-    const response = await fetch(`${base}/api/${encodeURIComponent(session)}/qrcode-session`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(10000)
-    });
+    const response = await wppFetch('qrcode-session', { timeoutMs: 10000 }, session);
     if (!response.ok) return res.status(502).json({ error: 'Não foi possível obter o QR Code do WhatsApp.' });
     if (response.headers.get('content-type')?.startsWith('image/')) {
       const image = Buffer.from(await response.arrayBuffer());
